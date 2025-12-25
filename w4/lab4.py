@@ -116,10 +116,10 @@ class Account:
         self.__balance -= amount
         self.__daily_limit -= amount
         to.__balance += amount
-        transactionW = Transaction('TW', atm, amount, self.__balance, to.__account_id)
+        transactionW = Transaction('TW', atm, amount, to.__balance, to.__account_id)
         transactionD = Transaction('TD', atm, amount, self.__balance, self.__account_id)
-        self.__transaction_list.append(transactionW)
-        to.__transaction_list.append(transactionD)
+        to.__transaction_list.append(transactionW)
+        self.__transaction_list.append(transactionD)
     
     def yearlyFee(self, amount):
         if self.__balance - amount >= 0: self.__balance -= amount
