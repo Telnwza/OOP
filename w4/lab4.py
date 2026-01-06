@@ -191,7 +191,7 @@ class Transaction:
         self.__to_account = account
 
     def print_transactions(self):
-        print(f'Type : {self.__type} | at Atm(id) : {self.__atm.get_id()} | amount = {self.__amount} | bal_afer = {self.__bal_after} | form/to account(no) : {self.__to_account}')
+        print(f'Type : {self.__type} | Atm : {self.__atm.get_id()} | amount : {self.__amount} | bal_afer = {self.__bal_after} | form/to account : {self.__to_account}')
 
 
 ##################################################################################

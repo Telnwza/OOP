@@ -1,7 +1,7 @@
 print(" *** ID card ****")
 data = input("Enter your student_ID firstname nickname : ").split()
 if len(data) != 3:
-  print("Invaid input1")
+  print("Invaid input")
   quit()
 
 std_id = data[0]
