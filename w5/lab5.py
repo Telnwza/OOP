@@ -100,9 +100,7 @@ class Account(ABC):
     # ========== Transaction Recording ==========
     
     def _create_transaction(self, type, channel_type, channel_id, amount, balance, target=None):
-        self.__transaction_list.append(
-            Transaction(type, channel_type, channel_id, amount, balance, target)
-        )
+        self.__transaction_list.append(Transaction(type, channel_type, channel_id, amount, balance, target))
 
     def print_transactions(self):
         print(f"\n--- History for {self.__account_no} ({type(self).__name__}) Balance: {self.__amount:.2f} ---")
@@ -199,7 +197,7 @@ class Account(ABC):
 
         if isinstance(channel, ATM_machine):
             channel.has_sufficient_cash(amount)
-            if (self.__amount - amount - fee) <= self.__card.annual_fee:
+            if self.__card != None and (self.__amount - amount - fee) <= self.__card.annual_fee:
                 raise ValueError("Not enough money in account for annual fee")
 
         self.__amount -= amount
@@ -471,7 +469,7 @@ class ATM_Card(Card):
         if not isinstance(account,Account) : raise TypeError("Type must be Account")
         if account.amount < self.ANNUAL_FEE: raise ValueError("Not Eough bal")
         account.card_fee(self.ANNUAL_FEE)
-        print("Done add Yearly Fee")
+        print("charge add Yearly Fee")
 
 class DebitCard(Card):
     ANNUAL_FEE = 300
@@ -501,7 +499,7 @@ class DebitCard(Card):
         if not isinstance(account,Account) : raise TypeError("Type must be Account")
         if account.amount < self.ANNUAL_FEE: raise ValueError("Not Eough bal")
         account.card_fee(self.ANNUAL_FEE)
-        print("Done add Yearly Fee")
+        print("Done charge Yearly Fee")
 
     def get_card_type(self):
         return 'Debit Card'
@@ -529,7 +527,7 @@ class PremiumCard(DebitCard):
         if not isinstance(account,Account) : raise TypeError("Type must be Account")
         if account.amount < self.ANNUAL_FEE: raise ValueError("Not Eough bal")
         account.card_fee(self.ANNUAL_FEE)
-        print("Done add Yearly Fee")
+        print("Done charge Yearly Fee")
 
     def get_card_type(self):
         return 'Premium Card'
@@ -815,6 +813,11 @@ class Bank:
             if account != None:
                 return account
         return None
+
+    def apply_annual_fee(self):
+        for user in self.__user_list:
+            for account in user.get_all_accounts():
+                account.card.charge_annual_fee(account)
 
 
 class User:
