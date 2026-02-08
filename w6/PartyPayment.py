@@ -56,22 +56,22 @@ class Member:
   def __init__(self, id, name) -> None:
     self._id = id
     self._name = name
-    self._coupon_list = []
+    self._coupon_code_list = []
 
   def add_coupon(self, code):
     coupon = Restaurant.get_coupon_by_code(code)
-    self._coupon_list.append([code, "NotUsed"])
+    self._coupon_code_list.append([code, "NotUsed"])
 
   def validate_coupon(self, code):
-    for coupon in self._coupon_list:
+    for coupon in self._coupon_code_list:
       if coupon[0] == code and coupon[1] == "NotUsed":
         return True
     return False
   
   def mark_coupon_used(self, code):
-    for index, coupon in enumerate(self._coupon_list):
+    for index, coupon in enumerate(self._coupon_code_list):
       if coupon[0] == code and coupon[1] == "NotUsed":
-        self._coupon_list[index][1] = "Used"
+        self._coupon_code_list[index][1] = "Used"
         return True
     return False
 
@@ -106,10 +106,20 @@ class Booking:
     self._status = "Pending"
     self._event_order = None
     self._coupon = None
+    self._total_price = None
 
   def add_event_order(self, event_order:EventOrder):
     if self._event_order != None :raise ValueError("Already Have Event Order")
     self._event_order = event_order
+
+  @property
+  def total_price(self):
+    return self._total_price
+  
+  @total_price.setter
+  def total_price(self, total_price):
+    if total_price >= 0:
+      self._total_price = total_price
 
   @property
   def status(self):
@@ -181,6 +191,7 @@ async def get_base_total(booking_id: str):
     raise HTTPException(status_code=404, detail="Booking or Order Not Found")
   
   base_total = booking.room_price + event_order.total_price
+  booking.total_price = base_total
 
   return {
     "booking_id" : booking_id,
@@ -190,7 +201,7 @@ async def get_base_total(booking_id: str):
   }
 
 @app.post("/partyroom-payment/apply-coupon")
-async def apply_coupon(booking_id:str, coupon_code:str, base_total: float):
+async def apply_coupon(booking_id:str, coupon_code:str):
   booking = BookingManager.get_booking_from_id(booking_id)
   member = booking.member
   coupon = Restaurant.get_coupon_by_code(coupon_code)
@@ -198,9 +209,15 @@ async def apply_coupon(booking_id:str, coupon_code:str, base_total: float):
   if not isinstance(booking, Booking) or not isinstance(member, Member) or not isinstance(coupon, Coupon):
     raise HTTPException(status_code=404, detail="member or booking not found")
   
+  base_total = booking.total_price
+
+  if not base_total:
+    raise  HTTPException(status_code=404, detail="didn't get base total yet")
+  
   if member.validate_coupon(coupon_code):
     discount_price = coupon.apply_Coupon(base_total)
     total_price = base_total - discount_price
+    booking.total_price = total_price
     return {
       "success" : True,
       "discount" : discount_price,
@@ -217,11 +234,14 @@ async def apply_coupon(booking_id:str, coupon_code:str, base_total: float):
 async def confirm_payment(booking_id:str, strategy):
   payment_success = True
 
+  booking = BookingManager.get_booking_from_id(booking_id)
+  if not booking:
+    raise HTTPException(status_code=404, detail="Booking not found")
+  
+  if not booking.total_price:
+    raise  HTTPException(status_code=404, detail="didn't get base total yet")
+
   if payment_success:
-    booking = BookingManager.get_booking_from_id(booking_id)
-    if not booking:
-      raise HTTPException(status_code=404, detail="Booking not found")
-    
     booking.status = "In Use"
 
     if booking.event_order:
