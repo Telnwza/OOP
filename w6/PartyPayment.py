@@ -1,9 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from abc import ABC, abstractmethod
-
-##เพิ่ม เก็บ total price ใน booking
 
 app = FastAPI()
 
@@ -57,6 +55,11 @@ class Member:
     self._id = id
     self._name = name
     self._coupon_code_list = []
+    self._receipt_list = []
+
+  def add_receipt(self, receipt):
+    self._receipt_list.append(receipt)
+
 
   def add_coupon(self, code):
     self._coupon_code_list.append([code, "NotUsed"])
@@ -104,21 +107,10 @@ class Booking:
     self._room_price = room_price
     self._status = "Pending"
     self._event_order = None
-    self._coupon = None
-    self._total_price = None
 
   def add_event_order(self, event_order:EventOrder):
     if self._event_order != None :raise ValueError("Already Have Event Order")
     self._event_order = event_order
-
-  @property
-  def total_price(self):
-    return self._total_price
-  
-  @total_price.setter
-  def total_price(self, total_price):
-    if total_price >= 0:
-      self._total_price = total_price
 
   @property
   def status(self):
@@ -127,14 +119,6 @@ class Booking:
   @status.setter
   def status(self, status):
     self._status = status
-
-  @property
-  def coupon(self):
-    return self._coupon
-  
-  @coupon.setter
-  def coupon(self, coupon:Coupon):
-    self._coupon = coupon
 
   @property
   def room_price(self):
@@ -170,9 +154,13 @@ class EventOrder:
   def status(self, status):
     self._status = status
 
-class PaymentGateway:
-  def __init__(self) -> None:
-    pass
+class PaymentGateway():
+
+  @classmethod
+  def pay(cls, total_price, strategy):
+    if total_price > 0:
+      return True
+    return False
 
 class Log:
   def __init__(self) -> None:
@@ -180,96 +168,53 @@ class Log:
 
 
 ########## APP ##########
-
-@app.get("/partyroom-payment/base-total/{booking_id}")
-async def get_base_total(booking_id: str):
+@app.post("/partyroom-payment/pay/{booking_id}")
+async def pay(booking_id: str, strategy, coupon_code: Optional[str] = Query(default=None)):
   booking = BookingManager.get_booking_from_id(booking_id)
   event_order = BookingManager.get_event_order_from_id(booking_id)
+  member = BookingManager.get_member_from_id(booking_id)
 
-  if not booking or not event_order:
+  if not isinstance(member, Member):
+    raise HTTPException(status_code=404, detail="Member Not Found")
+
+  if not isinstance(booking, Booking) or not isinstance(event_order, EventOrder):
     raise HTTPException(status_code=404, detail="Booking or Order Not Found")
   
-  base_total = booking.room_price + event_order.total_price
-  booking.total_price = base_total
-
-  return {
-    "booking_id" : booking_id,
-    "room_price" : booking.room_price,
-    "event_order_price" : event_order.total_price,
-    "base_total_price" : base_total
-  }
-
-@app.post("/partyroom-payment/apply-coupon")
-async def apply_coupon(booking_id:str, coupon_code:str):
-  booking = BookingManager.get_booking_from_id(booking_id)
-  member = booking.member
-  coupon = Restaurant.get_coupon_by_code(coupon_code)
+  if booking.status != "Pending":
+    raise HTTPException(status_code=404, detail="Already Paid")
   
-  if not isinstance(booking, Booking) or not isinstance(member, Member) or not isinstance(coupon, Coupon):
-    raise HTTPException(status_code=404, detail="member or booking not found")
-  
-  base_total = booking.total_price
-
-  if not base_total:
-    raise  HTTPException(status_code=404, detail="didn't get base total yet")
-  
-  if member.validate_coupon(coupon_code):
-    discount_price = coupon.apply_Coupon(base_total)
-    total_price = base_total - discount_price
-    booking.total_price = total_price
-    booking.coupon = coupon
-    return {
-      "success" : True,
-      "discount" : discount_price,
-      "total_price" : total_price
-    }
-  else:
-    return {
-      "success" : False,
-      "discount" : 0,
-      "total_price" : base_total
-    }
-
-@app.post("/partyroom-payment/confirm-payment")
-async def confirm_payment(booking_id:str, strategy):
-  payment_success = True
-
-  booking = BookingManager.get_booking_from_id(booking_id)
-  if not booking:
-    raise HTTPException(status_code=404, detail="Booking not found")
-  
-  if not booking.total_price:
-    raise  HTTPException(status_code=404, detail="didn't get base total yet")
-  
-  total = booking.total_price
+  total_price = booking.room_price + event_order.total_price
 
   coupon = None
-  if booking.coupon:
-    coupon = booking.coupon.code
+  
+  if coupon_code:
+    coupon = Restaurant.get_coupon_by_code(coupon_code)
+    if not isinstance(coupon, Coupon):
+      raise HTTPException(status_code=404, detail="Coupon Code Not Found")
+    
+    if member.validate_coupon(coupon_code):
+      discount_price = coupon.apply_Coupon(total_price)
+      total_price = total_price - discount_price
+    else:
+      HTTPException(status_code=404, detail="Coupon Code Invalid")
 
-  if payment_success:
+  if PaymentGateway.pay(total_price=total_price, strategy=strategy):
+    member.mark_coupon_used(coupon_code)
     booking.status = "In Use"
-
-    if booking.event_order:
-      booking.event_order.status = "Queued"
-
-    member = booking.member
-
-    if booking.coupon:
-            member.mark_coupon_used(booking.coupon.code)
-            
+    event_order.status = "Queued"
+    member.add_receipt("Bla Bla")
     print(f"Logging transaction for {booking_id}...")
-
     return {
             "status": "Complete",
-            "toal paid" : total,
+            "toal paid" : total_price,
             "coupon used" : coupon,
             "receipt_id": "REC-999",
             "message": "Payment successful and records updated"
-        }
+    }
   else:
-        return {"status": "Failed", "message": "ShowErrorPaymentInvalid"}
-  
+    return HTTPException(status_code=404, detail="PaymentInvalid")
+    
+
 ######### Mock Data #########
 
 # Clear existing data
