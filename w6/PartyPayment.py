@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 app = FastAPI()
-http://127.0.0.1:8001/
+
 class Restaurant:
   coupon_list = []
   member_list = []
