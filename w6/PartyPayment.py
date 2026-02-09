@@ -1,7 +1,10 @@
+from __future__ import annotations
 from pydantic import BaseModel
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Query
 from abc import ABC, abstractmethod
+import uuid
+from datetime import datetime, timezone
 
 app = FastAPI()
 
@@ -37,6 +40,7 @@ class BookingManager:
   @classmethod
   def get_event_order_from_id(cls, booking_id):
     booking = cls.get_booking_from_id(booking_id)
+    if not booking: return None
     return booking.event_order
   
   @classmethod
@@ -83,6 +87,10 @@ class Coupon(ABC):
     self._code = code
     self._minimum_price = minimum_price
 
+  def is_applicable(self, base_price):
+    if base_price < self._minimum_price:
+      raise HTTPException(status_code=400, detail="Didn't meet minimum_price")
+
   @abstractmethod
   def apply_Coupon(self, base_price:float):
     pass
@@ -94,9 +102,12 @@ class Coupon(ABC):
 class PercentCoupon(Coupon):
   def __init__(self, id, code, minimum_price, percent) -> None:
     super().__init__(id, code, minimum_price)
+    if percent < 0 or percent > 100:
+      raise ValueError("Percent must be in range 0-100")
     self._percent = percent
 
   def apply_Coupon(self, base_price:float):
+    super().is_applicable(base_price)
     return base_price*self._percent/100
 
 
@@ -154,13 +165,35 @@ class EventOrder:
   def status(self, status):
     self._status = status
 
-class PaymentGateway():
+class PaymentGateway:
+    @classmethod
+    def pay(cls, total_price: float, strategy: PaymentStrategy):
+        return strategy.pay(total_price)
+    
+    @classmethod
+    def get_payment_strategy(cls, name: str):
+      strategies = {
+          "success": SuccessStrategy(),
+          "fail": FailStrategy(),
+      }
+      if name not in strategies:
+          raise HTTPException(status_code=400, detail="Unknown strategy")
+      return strategies[name]
+  
+class PaymentStrategy(ABC):
+    @abstractmethod
+    def pay(self, amount: float):
+        pass
 
-  @classmethod
-  def pay(cls, total_price, strategy):
-    if total_price > 0:
-      return True
-    return False
+class SuccessStrategy(PaymentStrategy):
+    def pay(self, amount: float):
+        if amount <= 0:
+            return False, "Amount is less than 1"
+        return True, f"REC-{uuid.uuid4().hex[:8]}"
+
+class FailStrategy(PaymentStrategy):
+    def pay(self, amount: float):
+        return False, "Payment Declined"
 
 class Log:
   def __init__(self) -> None:
@@ -181,11 +214,13 @@ async def pay(booking_id: str, strategy, coupon_code: Optional[str] = Query(defa
     raise HTTPException(status_code=404, detail="Booking or Order Not Found")
   
   if booking.status != "Pending":
-    raise HTTPException(status_code=404, detail="Already Paid")
+    raise HTTPException(status_code=409, detail="Already Paid")
   
-  total_price = booking.room_price + event_order.total_price
+  base_total = booking.room_price + event_order.total_price
+  final_total = base_total
 
   coupon = None
+  applied_coupon = False
   
   if coupon_code:
     coupon = Restaurant.get_coupon_by_code(coupon_code)
@@ -193,26 +228,32 @@ async def pay(booking_id: str, strategy, coupon_code: Optional[str] = Query(defa
       raise HTTPException(status_code=404, detail="Coupon Code Not Found")
     
     if member.validate_coupon(coupon_code):
-      discount_price = coupon.apply_Coupon(total_price)
-      total_price = total_price - discount_price
+      discount_price = coupon.apply_Coupon(base_total)
+      applied_coupon = True
+      final_total = base_total - discount_price
+      if final_total < 0:
+        raise HTTPException(status_code=400, detail="total price can't be below 0")
     else:
-      HTTPException(status_code=404, detail="Coupon Code Invalid")
-
-  if PaymentGateway.pay(total_price=total_price, strategy=strategy):
-    member.mark_coupon_used(coupon_code)
+      raise HTTPException(status_code=400, detail="Coupon Code Invalid")
+    
+  payment_strategy = PaymentGateway.get_payment_strategy(strategy)
+  payment_success, payment_deail = payment_strategy.pay(final_total)
+  if payment_success:
+    if applied_coupon:
+      member.mark_coupon_used(coupon_code)
     booking.status = "In Use"
     event_order.status = "Queued"
-    member.add_receipt("Bla Bla")
+
     print(f"Logging transaction for {booking_id}...")
     return {
             "status": "Complete",
-            "toal paid" : total_price,
-            "coupon used" : coupon,
-            "receipt_id": "REC-999",
+            "toal paid" : final_total,
+            "coupon_code" : coupon.code if applied_coupon and coupon else None,
+            "receipt_id": payment_deail,
             "message": "Payment successful and records updated"
     }
   else:
-    return HTTPException(status_code=404, detail="PaymentInvalid")
+    raise HTTPException(status_code=404, detail=payment_deail)
     
 
 ######### Mock Data #########
