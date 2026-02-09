@@ -232,7 +232,7 @@ class Receipt:
         return {
             "receipt_no": self._transaction.id,
             "date": self._transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "merchant": "PartyRoom FastFood & Co.",
+            "merchant": "Knight Chicken Fast Food Co.",
             "customer": self._booking.member._name,
             "items": [
                 {"name": "Room Charge", "price": self._booking.room_price},
