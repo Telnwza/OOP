@@ -85,6 +85,29 @@ class Booking:
         self._status = "Pending"
         self._event_order: Optional[EventOrder] = None
 
+    def calculate_payment_details(self, coupon_code: Optional[str] = None) -> Tuple[float, float, float, Optional[Coupon]]:
+        base_price = self.total_base_price
+        discount = 0.0
+        final_price = base_price
+        coupon = None
+
+        if coupon_code:
+            coupon = Restaurant.get_coupon_by_code(coupon_code)
+            if not coupon:
+                raise ValueError("Coupon Not Found")
+            if not self.member.validate_coupon(coupon_code):
+                raise ValueError("Member does not have this coupon or used")
+            if not coupon.is_applicable(base_price):
+                raise ValueError("Does Not Meet Minimum Price")
+            
+            discount = coupon.apply_coupon(base_price)
+            final_price = base_price - discount
+
+        if final_price < 0:
+            raise ValueError("Negative Price")
+        
+        return (base_price, discount, final_price, coupon)
+            
     def add_event_order(self, event_order: EventOrder):
         if self._event_order is not None:
             raise ValueError("Already Have Event Order")
@@ -270,32 +293,17 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
     
     if booking.status != "Pending":
         raise HTTPException(status_code=409, detail="Booking already paid")
-
-    member = booking.member
-    base_total = booking.total_base_price
-    final_total = base_total
-    discount = 0.0
     
-    if coupon_code:
-        
-        coupon = Restaurant.get_coupon_by_code(coupon_code)
-        if not coupon:
-            raise HTTPException(status_code=404, detail="Coupon Code Not Found")
-        
-        if not member.validate_coupon(coupon_code):
-             raise HTTPException(status_code=400, detail="Member does not have this coupon or used")
-        
-        if not coupon.is_applicable(base_total):
-            raise HTTPException(status_code=400, detail="Price not enough for coupon")
-
-        discount = coupon.apply_coupon(base_total)
-        final_total = base_total - discount
+    try:
+      base_total, discount, final_total, coupon = booking.calculate_payment_details(coupon_code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
-    if final_total < 0: 
-        raise HTTPException(status_code=400, detail="Error: Negative Price")
-
-    payment_strategy = PaymentStrategy.get_strategy(strategy)
-    success, receipt_or_msg = payment_strategy.pay(final_total)
+    try:
+        payment_strategy = PaymentStrategy.get_strategy(strategy)
+        success, receipt_or_msg = payment_strategy.pay(final_total)
+    except HTTPException as e:
+        raise e
 
     transaction = Transaction(booking_id,final_total,strategy.lower(), "PENDING", receipt_or_msg, coupon_code if discount > 0 else None)
 
@@ -304,6 +312,7 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
         if booking.event_order:
             booking.event_order.status = "Queued"
         
+        member = booking.member
         if coupon_code:
             member.mark_coupon_used(coupon_code)
 
