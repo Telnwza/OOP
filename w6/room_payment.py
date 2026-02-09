@@ -58,6 +58,9 @@ class Member:
                 item[1] = "Used"
                 return True
         return False
+    
+    @property
+    def name(self): return self._name
 
 class EventOrder:
     def __init__(self, id, total_price: float) -> None:
@@ -85,28 +88,25 @@ class Booking:
         self._status = "Pending"
         self._event_order: Optional[EventOrder] = None
 
-    def calculate_payment_details(self, coupon_code: Optional[str] = None) -> Tuple[float, float, float, Optional[Coupon]]:
+    def calculate_payment_details(self, coupon: Optional[Coupon] = None) -> Tuple[float, float]:
         base_price = self.total_base_price
         discount = 0.0
         final_price = base_price
         coupon = None
 
-        if coupon_code:
-            coupon = Restaurant.get_coupon_by_code(coupon_code)
-            if not coupon:
-                raise ValueError("Coupon Not Found")
-            if not self.member.validate_coupon(coupon_code):
-                raise ValueError("Member does not have this coupon or used")
-            if not coupon.is_applicable(base_price):
-                raise ValueError("Does Not Meet Minimum Price")
-            
-            discount = coupon.apply_coupon(base_price)
-            final_price = base_price - discount
+        if coupon:
+          if not self.member.validate_coupon(coupon.code):
+              raise ValueError("Member does not have this coupon or used")
+          if not coupon.is_applicable(base_price):
+              raise ValueError("Does Not Meet Minimum Price")
+          
+          discount = coupon.apply_coupon(base_price)
+          final_price = base_price - discount
 
         if final_price < 0:
-            raise ValueError("Negative Price")
+          raise ValueError("Negative Price")
         
-        return (base_price, discount, final_price, coupon)
+        return (discount, final_price)
             
     def add_event_order(self, event_order: EventOrder):
         if self._event_order is not None:
@@ -256,7 +256,7 @@ class Receipt:
             "receipt_no": self._transaction.id,
             "date": self._transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
             "merchant": "Knight Chicken Fast Food Co.",
-            "customer": self._booking.member._name,
+            "customer": self._booking.member.name,
             "items": [
                 {"name": "Room Charge", "price": self._booking.room_price},
                 {"name": "Food Orders", "price": self._booking.event_order.total_price if self._booking.event_order else 0}
@@ -294,16 +294,19 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
     if booking.status != "Pending":
         raise HTTPException(status_code=409, detail="Booking already paid")
     
+    coupon = None
+    if coupon_code:
+        coupon = Restaurant.get_coupon_by_code(coupon_code)
+        if not coupon:
+                raise HTTPException(status_code=400, detail="Coupon Not Found")
+
     try:
-      base_total, discount, final_total, coupon = booking.calculate_payment_details(coupon_code)
+      discount, final_total = booking.calculate_payment_details(coupon)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-    try:
-        payment_strategy = PaymentStrategy.get_strategy(strategy)
-        success, receipt_or_msg = payment_strategy.pay(final_total)
-    except HTTPException as e:
-        raise e
+    payment_strategy = PaymentStrategy.get_strategy(strategy)
+    success, receipt_or_msg = payment_strategy.pay(final_total)
 
     transaction = Transaction(booking_id,final_total,strategy.lower(), "PENDING", receipt_or_msg, coupon_code if discount > 0 else None)
 
@@ -342,7 +345,7 @@ Restaurant.add_member(alice)
 
 c1 = PercentCoupon("C001", "SAVE10", 100, 10.0)
 Restaurant.add_coupon(c1)
-alice.add_coupon("SAVE10") # Alice มีคูปอง
+alice.add_coupon("SAVE10")
 
 # Create Booking
 order1 = EventOrder("ORD-001", 150.0)
