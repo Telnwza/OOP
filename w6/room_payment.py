@@ -157,84 +157,84 @@ class BookingManager:
 
     @classmethod
     def get_booking_from_id(cls, booking_id: str) -> Optional[Booking]:
-        for booking in cls._booking_list:
-            if booking.id == booking_id:
-                return booking
-        return None
+      for booking in cls._booking_list:
+        if booking.id == booking_id:
+          return booking
+      return None
     
 class PaymentStrategy(ABC):
     @classmethod
     def get_strategy(cls, name: str) -> PaymentStrategy:
-        for strategy_cls in PaymentStrategy.__subclasses__():
-            try:
-                if strategy_cls.get_name().lower() == name.lower():
-                    return strategy_cls
-            except NotImplementedError:
-                continue
-        raise HTTPException(status_code=400, detail=f"Unknown Strategy: {name}")
+      for strategy_cls in PaymentStrategy.__subclasses__():
+        try:
+          if strategy_cls.get_name().lower() == name.lower():
+            return strategy_cls
+        except NotImplementedError:
+          continue
+      raise HTTPException(status_code=400, detail=f"Unknown Strategy: {name}")
     
     @staticmethod
     @abstractmethod
     def get_name() -> str:
-        pass
+      pass
     @staticmethod
     @abstractmethod
     def pay(amount: float) -> Tuple[bool, str]:
-        pass
+      pass
 
 class QRCode(PaymentStrategy):
     @staticmethod
     def get_name() -> str: return "QRCode"
     @staticmethod
     def pay(amount: float) -> Tuple[bool, str]:
-        success = random.random() < 0.90
-        if success : return True, f"REC-{uuid.uuid4().hex[:8].upper()}"
-        return False, "Payment Declined"
+      success = random.random() < 0.90
+      if success : return True, f"REC-{uuid.uuid4().hex[:8].upper()}"
+      return False, "Payment Declined"
 
 class CreditCard(PaymentStrategy):
     @staticmethod
     def get_name() -> str: return "CreditCard"
     @staticmethod
     def pay(amount: float) -> Tuple[bool, str]:
-        success = random.random() < 0.80
-        if success : return True, f"REC-{uuid.uuid4().hex[:8].upper()}"
-        return False, "Payment Declined"
+      success = random.random() < 0.80
+      if success : return True, f"REC-{uuid.uuid4().hex[:8].upper()}"
+      return False, "Payment Declined"
 
 class Cash(PaymentStrategy):
     @staticmethod
     def get_name() -> str: return "Cash"
     @staticmethod
     def pay(amount: float) -> Tuple[bool, str]:
-        success = random.random() < 0.99
-        if success : return True, f"REC-{uuid.uuid4().hex[:8].upper()}"
-        return False, "Payment Declined"
+      success = random.random() < 0.99
+      if success : return True, f"REC-{uuid.uuid4().hex[:8].upper()}"
+      return False, "Payment Declined"
 
 class LogManager:
     _transaction_list: List[Transaction] = []
 
     @classmethod
     def add_log(cls, transaction: Transaction):
-        cls._transaction_list.append(transaction)
-        print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction.status} | {transaction.amount} THB")
+      cls._transaction_list.append(transaction)
+      print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction.status} | {transaction.amount} THB")
 
     @classmethod
     def get_logs_by_booking(cls, booking_id: str) -> List[Transaction]:
-        found_logs = []
-        for log in cls._transaction_list:
-            if log.booking_id == booking_id:
-                found_logs.append(log)
-        return found_logs
+      found_logs = []
+      for log in cls._transaction_list:
+        if log.booking_id == booking_id:
+          found_logs.append(log)
+      return found_logs
     
 class Transaction:
     def __init__(self, booking_id: str, amount: float, strategy: str, status: str, payment_id: str,coupon_code: Optional[str] = None):
-        self._id = f"TXN-{uuid.uuid4().hex[:12].upper()}"
-        self._booking_id = booking_id
-        self._amount = amount
-        self._strategy = strategy
-        self._status = status
-        self._payment_id = payment_id
-        self._coupon_code = coupon_code
-        self._timestamp = datetime.now()
+      self._id = f"TXN-{uuid.uuid4().hex[:12].upper()}"
+      self._booking_id = booking_id
+      self._amount = amount
+      self._strategy = strategy
+      self._status = status
+      self._payment_id = payment_id
+      self._coupon_code = coupon_code
+      self._timestamp = datetime.now()
 
     def mark_success(self): self._status = "SUCCESS"
     def mark_failed(self): self._status = "FAILED"
@@ -255,27 +255,27 @@ class Transaction:
     def booking_id(self): return self._booking_id
 
 class Receipt:
-    def __init__(self, transaction: Transaction, booking: Booking):
-        self._transaction = transaction
-        self._booking = booking
+  def __init__(self, transaction: Transaction, booking: Booking):
+    self._transaction = transaction
+    self._booking = booking
 
-    def generate(self):
-        return {
-            "receipt_no": self._transaction.id,
-            "date": self._transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "merchant": "Knight Chicken Fast Food Co.",
-            "customer": self._booking.member.name,
-            "items": [
-                {"name": "Room Charge", "price": self._booking.room_price},
-                {"name": "Food Orders", "price": self._booking.event_order.total_price if self._booking.event_order else 0}
-            ],
-            "total_base_price" : self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0,
-            "discount_coupon": self._transaction.coupon_code,
-            "discounted": (self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0) - self._transaction.amount,
-            "total_paid": self._transaction._amount,
-            "payment_method": self._transaction.strategy,
-            "status": "PAID"
-        }
+  def generate(self):
+    return {
+      "receipt_no": self._transaction.id,
+      "date": self._transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+      "merchant": "Knight Chicken Fast Food Co.",
+      "customer": self._booking.member.name,
+      "items": [
+          {"name": "Room Charge", "price": self._booking.room_price},
+          {"name": "Food Orders", "price": self._booking.event_order.total_price if self._booking.event_order else 0}
+      ],
+      "total_base_price" : self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0,
+      "discount_coupon": self._transaction.coupon_code,
+      "discounted": (self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0) - self._transaction.amount,
+      "total_paid": self._transaction._amount,
+      "payment_method": self._transaction.strategy,
+      "status": "PAID"
+    }
 
 # API Endpoints 
 
