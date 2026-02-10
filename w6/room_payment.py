@@ -92,7 +92,6 @@ class Booking:
         base_price = self.total_base_price
         discount = 0.0
         final_price = base_price
-        coupon = None
 
         if coupon:
           if not self.member.validate_coupon(coupon.code):
@@ -216,13 +215,13 @@ class LogManager:
     @classmethod
     def add_log(cls, transaction: Transaction):
         cls._transaction_list.append(transaction)
-        print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction._status} | {transaction._amount} THB")
+        print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction.status} | {transaction.amount} THB")
 
     @classmethod
     def get_logs_by_booking(cls, booking_id: str) -> List[Transaction]:
         found_logs = []
         for log in cls._transaction_list:
-            if log._booking_id == booking_id:
+            if log.booking_id == booking_id:
                 found_logs.append(log)
         return found_logs
     
@@ -237,6 +236,9 @@ class Transaction:
         self._coupon_code = coupon_code
         self._timestamp = datetime.now()
 
+    def mark_success(self): self._status = "SUCCESS"
+    def mark_failed(self): self._status = "FAILED"
+
     @property
     def id(self): return self._id
     @property
@@ -245,6 +247,12 @@ class Transaction:
     def status(self): return self._status
     @property
     def amount(self): return self._amount
+    @property
+    def strategy(self): return self._strategy
+    @property
+    def coupon_code(self): return self._coupon_code
+    @property
+    def booking_id(self): return self._booking_id
 
 class Receipt:
     def __init__(self, transaction: Transaction, booking: Booking):
@@ -262,10 +270,10 @@ class Receipt:
                 {"name": "Food Orders", "price": self._booking.event_order.total_price if self._booking.event_order else 0}
             ],
             "total_base_price" : self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0,
-            "discount_coupon": self._transaction._coupon_code,
-            "discounted": (self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0) - self._transaction._amount,
+            "discount_coupon": self._transaction.coupon_code,
+            "discounted": (self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0) - self._transaction.amount,
             "total_paid": self._transaction._amount,
-            "payment_method": self._transaction._strategy,
+            "payment_method": self._transaction.strategy,
             "status": "PAID"
         }
 
@@ -316,17 +324,18 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
             booking.event_order.status = "Queued"
         
         member = booking.member
-        if coupon_code:
-            member.mark_coupon_used(coupon_code)
+        if coupon_code and discount > 0:
+          if not member.mark_coupon_used(coupon_code):
+              raise HTTPException(status_code=500, detail="can't mark coupon as used") 
 
-        transaction._status = "SUCCESS"
+        transaction.mark_success()
         LogManager.add_log(transaction)
 
         receipt = Receipt(transaction, booking)
         return receipt.generate()
     
     else:
-        transaction._status = "FAILED"
+        transaction.mark_failed()
         LogManager.add_log(transaction)
 
         raise HTTPException(status_code=402, detail=f"Payment Failed: {receipt_or_msg}")
