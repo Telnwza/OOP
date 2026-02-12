@@ -5,8 +5,9 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 import uuid
 import random
+from fastmcp import FastMCP
 
-app = FastAPI()
+mcp = FastMCP()
 
 class Coupon(ABC):
     def __init__(self, id, code, minimum_price) -> None:
@@ -149,6 +150,7 @@ class Restaurant:
         return None
 
 class BookingManager:
+    """Controller จัดการเกี่ยวกับการจ่ายเงิน"""
     _booking_list: List[Booking] = []
 
     @classmethod
@@ -279,8 +281,12 @@ class Receipt:
 
 # API Endpoints 
 
-@app.get("/partyroom-payment/base-price/{booking_id}")
+@mcp.tool
 async def get_base_price(booking_id: str):
+    """
+    ตรวจสอบจำนวนเงินทั้งหมดที่ต้องจ่าย แบบที่ยังไม่ใส่ส่วนลด โดยรับ booking_id เป็น parameter มี Format เป็น Bxxx
+    และจำคืนค่า room_price และ order_price และ total_base_price
+    """
     booking = BookingManager.get_booking_from_id(booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking Not Found")
@@ -292,9 +298,12 @@ async def get_base_price(booking_id: str):
         "total_base_price": booking.total_base_price
     }
 
-@app.post("/partyroom-payment/pay/{booking_id}")
+@mcp.tool
 async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query(default=None)):
-    
+    """
+    จ่ายเงิน โดยรับ booking_id เป็น parameter มี Format เป็น Bxxx ช่องทางการจ่ายเงิน มี QRCode , Cash(เงินสด) และ CreditCard
+    และจะใช้คูปองหรือไม่ก็ได้ ถ้าใช้คูปอง จะรับคูปองมาเป็น Code
+    """
     booking = BookingManager.get_booking_from_id(booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking Not Found")
@@ -350,20 +359,44 @@ BookingManager._booking_list.clear()
 
 # Create Member & Coupon
 alice = Member("M001", "Alice")
+bob = Member("M002", "Bob")
 Restaurant.add_member(alice)
+Restaurant.add_member(bob)
 
 c1 = PercentCoupon("C001", "SAVE10", 100, 10.0)
+c2 = PercentCoupon("C002", "SAVE20", 500, 20.0)
 Restaurant.add_coupon(c1)
-alice.add_coupon("SAVE10")
+Restaurant.add_coupon(c2)
 
-# Create Booking
+alice.add_coupon("SAVE10")
+bob.add_coupon("SAVE10")
+bob.add_coupon("SAVE20")
+
+
+# Create Bookings
+# Booking 1: Alice with a room and an event order, eligible for SAVE10
 order1 = EventOrder("ORD-001", 150.0)
 b1 = Booking("B001", alice, 200.0)
 b1.add_event_order(order1)
 BookingManager.add_booking(b1)
 
+# Booking 2: Bob with a room and a large event order, eligible for SAVE20
+order2 = EventOrder("ORD-002", 600.0)
+b2 = Booking("B002", bob, 400.0)
+b2.add_event_order(order2)
+BookingManager.add_booking(b2)
+
+# Booking 3: Alice with just a room booking
+b3 = Booking("B003", alice, 150.0)
+BookingManager.add_booking(b3)
+
+# Booking 4: Bob with a small order, not meeting minimum for any coupon
+order3 = EventOrder("ORD-003", 50.0)
+b4 = Booking("B004", bob, 40.0)
+b4.add_event_order(order3)
+BookingManager.add_booking(b4)
+
 print("Mock Data Initialized. Ready to test.")
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    mcp.run()
