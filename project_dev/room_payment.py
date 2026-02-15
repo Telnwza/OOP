@@ -3,11 +3,37 @@ from typing import Optional, List, Tuple
 from fastapi import FastAPI, HTTPException, Query
 from abc import ABC, abstractmethod
 from datetime import datetime
+from enum import Enum
+from fastmcp import FastMCP
 import uuid
 import random
-from fastmcp import FastMCP
 
 mcp = FastMCP()
+
+class OrderType(Enum):
+    DELIVERY = "Delivery"
+    EVENT = "Event"
+
+class OrderStatus(Enum):
+    PLACED = "Placed"
+    PAID = "Paid"
+    COOKING = "Cooking"
+    READY_TO_PICKUP = "Ready"      
+    COMPLETED = "Completed"
+    CANCLED = "Cancled"  
+
+class CouponStatus(Enum):
+    USED = "Used"
+    AVALIBLE = "Avalible"
+
+class EventOrderStatus(Enum):
+    PENDING = "Pending"
+    QUEUED = "Queued"
+
+class BookingStatus(Enum):
+    PENDING = "Pending"
+    IN_USE = "In Use"
+    
 
 class Coupon(ABC):
     def __init__(self, id, code, minimum_price) -> None:
@@ -42,21 +68,21 @@ class Member:
     def __init__(self, id, name) -> None:
         self._id = id
         self._name = name
-        self._coupon_list: List[List[str]] = [] 
+        self._coupon_list: List[List[str | CouponStatus]] = [] 
 
     def add_coupon(self, code: str):
-        self._coupon_list.append([code, "NotUsed"])
+        self._coupon_list.append([code, CouponStatus.AVALIBLE])
 
     def validate_coupon(self, code: str) -> bool:
         for item in self._coupon_list:
-            if item[0] == code and item[1] == "NotUsed":
+            if item[0] == code and item[1] == CouponStatus.AVALIBLE:
                 return True
         return False
     
     def mark_coupon_used(self, code: str) -> bool:
         for item in self._coupon_list:
-            if item[0] == code and item[1] == "NotUsed":
-                item[1] = "Used"
+            if item[0] == code and item[1] == CouponStatus.AVALIBLE:
+                item[1] = CouponStatus.USED
                 return True
         return False
     
@@ -67,7 +93,7 @@ class EventOrder:
     def __init__(self, id, total_price: float) -> None:
         self._id = id
         self._total_price = total_price
-        self._status = "Pending"
+        self._status: EventOrderStatus = EventOrderStatus.PENDING
     
     @property
     def total_price(self):
@@ -78,7 +104,7 @@ class EventOrder:
         return self._status
     
     @status.setter
-    def status(self, status):
+    def status(self, status: EventOrderStatus):
         self._status = status
 
 class Booking:
@@ -86,7 +112,7 @@ class Booking:
         self._id = id
         self._member = member
         self._room_price = room_price
-        self._status = "Pending"
+        self._status: BookingStatus = BookingStatus.PENDING
         self._event_order: Optional[EventOrder] = None
 
     def calculate_payment_details(self, coupon: Optional[Coupon] = None) -> Tuple[float, float]:
@@ -124,9 +150,9 @@ class Booking:
     @property
     def member(self): return self._member
     @property
-    def status(self): return self._status
+    def status(self) -> BookingStatus: return self._status
     @status.setter
-    def status(self, val): self._status = val
+    def status(self, val: BookingStatus): self._status = val
     @property
     def event_order(self): return self._event_order
 
@@ -274,7 +300,7 @@ class Receipt:
       "total_base_price" : self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0,
       "discount_coupon": self._transaction.coupon_code,
       "discounted": (self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0) - self._transaction.amount,
-      "total_paid": self._transaction._amount,
+      "total_paid": self._transaction.amount,
       "payment_method": self._transaction.strategy,
       "status": "PAID"
     }
@@ -308,7 +334,7 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
     if not booking:
         raise HTTPException(status_code=404, detail="Booking Not Found")
     
-    if booking.status != "Pending":
+    if booking.status != BookingStatus.PENDING:
         raise HTTPException(status_code=409, detail="Booking already paid")
     
     coupon = None
@@ -328,9 +354,9 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
     transaction = Transaction(booking_id,final_total,strategy.lower(), "PENDING", receipt_or_msg, coupon_code if discount > 0 else None)
 
     if success:
-        booking.status = "In Use"
+        booking.status = BookingStatus.IN_USE
         if booking.event_order:
-            booking.event_order.status = "Queued"
+            booking.event_order.status = EventOrderStatus.QUEUED
         
         member = booking.member
         if coupon_code and discount > 0:
