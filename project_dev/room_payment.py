@@ -10,11 +10,20 @@ import random
 
 mcp = FastMCP()
 
+class Status(Enum):
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
 class OrderType(Enum):
+    GENERAL = "General"
     DELIVERY = "Delivery"
     EVENT = "Event"
 
+class DeliveryPlatformName(Enum):
+    GRAB_FOOD = "GrabFood"
+    LINEMAN = "LineMan"
+
 class OrderStatus(Enum):
+    PENDING = "Pending"
     PLACED = "Placed"
     PAID = "Paid"
     COOKING = "Cooking"
@@ -33,7 +42,57 @@ class EventOrderStatus(Enum):
 class BookingStatus(Enum):
     PENDING = "Pending"
     IN_USE = "In Use"
+
+##### Delivery #####
+
+class Food:
+    def __init__(self, name, price):
+        self.name = name
+        self.price = price
+
+class DeliveryOrder:
+    def __init__(self, id: str, customer_id: str, platform: DeliveryPlatformName):
+        self._id = id
+        self._customer_id = customer_id
+        self._platform = platform
+        self._food_list: list[Food] = []
+        self._total_price: float = 0.0
+        self._status = OrderStatus.PENDING
+        self._receipt_id = None
+
+    def add_food(self, food: Food):
+        self._food_list.append(food)
+        self._total_price += food.price
+
+    def mark_as_paid(self):
+        self._status = OrderStatus.PAID
     
+    def get_bill_info(self):
+        items = [{"name": f.name, "price": f.price} for f in self._food_list]
+        
+        return {
+            "customer_name": self._customer_id,
+            "items": items,
+            "total_base_price": self._total_price
+        }
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def total_price(self):
+        return self._total_price
+    
+    @property
+    def status(self):
+        return self._status
+    
+    @status.setter
+    def status(self, status: EventOrderStatus):
+        self._status = status
+
+##### Booking #####
 
 class Coupon(ABC):
     def __init__(self, id, code, minimum_price) -> None:
@@ -94,6 +153,10 @@ class EventOrder:
         self._id = id
         self._total_price = total_price
         self._status: EventOrderStatus = EventOrderStatus.PENDING
+
+    @property
+    def id(self):
+        return self._id
     
     @property
     def total_price(self):
@@ -138,6 +201,19 @@ class Booking:
         if self._event_order is not None:
             raise ValueError("Already Have Event Order")
         self._event_order = event_order
+    
+    def get_bill_info(self):
+        items = [
+            {"name": "Room Charge", "price": self._room_price}
+        ]
+        if self._event_order:
+             items.append({"name": "Event Food", "price": self._event_order.total_price})
+
+        return {
+            "customer_name": self._member.name,
+            "items": items,
+            "total_base_price": self.total_base_price
+        }
 
     @property
     def total_base_price(self) -> float:
@@ -159,10 +235,27 @@ class Booking:
 class Restaurant:
     _coupon_list: List[Coupon] = []
     _member_list: List[Member] = []
+    _order_queue: list[DeliveryOrder] = []
+    _menu = [
+        Food("Chicken", 50.5), 
+        Food("Burger", 89.0), 
+        Food("Coke", 25.0)
+        ]
+    
+    @classmethod
+    def get_menu(cls):
+        return cls._menu
 
     @classmethod
     def add_member(cls, member: Member):
         cls._member_list.append(member)
+    
+    @classmethod
+    def receive_order(cls, order: DeliveryOrder):
+        if order.status == OrderStatus.PAID:
+            cls._order_queue.append(order)
+        else:
+            raise HTTPException(status_code=400, detail=f"Order Not paid yet")
 
     @classmethod
     def add_coupon(cls, coupon: Coupon):
@@ -192,7 +285,7 @@ class BookingManager:
     
 class PaymentStrategy(ABC):
     @classmethod
-    def get_strategy(cls, name: str) -> PaymentStrategy:
+    def get_strategy(cls, name: str):
       for strategy_cls in PaymentStrategy.__subclasses__():
         try:
           if strategy_cls.get_name().lower() == name.lower():
@@ -245,27 +338,21 @@ class LogManager:
       cls._transaction_list.append(transaction)
       print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction.status} | {transaction.amount} THB")
 
-    @classmethod
-    def get_logs_by_booking(cls, booking_id: str) -> List[Transaction]:
-      found_logs = []
-      for log in cls._transaction_list:
-        if log.booking_id == booking_id:
-          found_logs.append(log)
-      return found_logs
     
 class Transaction:
-    def __init__(self, booking_id: str, amount: float, strategy: str, status: str, payment_id: str,coupon_code: Optional[str] = None):
+    def __init__(self, target_id: str, amount: float, strategy: str, status: str, payment_id: str, coupon_code: Optional[str] = None, order_type: OrderType = OrderType.GENERAL):
       self._id = f"TXN-{uuid.uuid4().hex[:12].upper()}"
-      self._booking_id = booking_id
+      self._target_id = target_id
       self._amount = amount
       self._strategy = strategy
       self._status = status
       self._payment_id = payment_id
       self._coupon_code = coupon_code
       self._timestamp = datetime.now()
+      self._order_type = order_type
 
-    def mark_success(self): self._status = "SUCCESS"
-    def mark_failed(self): self._status = "FAILED"
+    def mark_success(self): self._status = Status.SUCCESS
+    def mark_failed(self): self._status = Status.FAILED
 
     @property
     def id(self): return self._id
@@ -280,30 +367,37 @@ class Transaction:
     @property
     def coupon_code(self): return self._coupon_code
     @property
-    def booking_id(self): return self._booking_id
+    def target_id(self): return self._target_id
+    @property
+    def order_type(self): return self._order_type
 
 class Receipt:
-  def __init__(self, transaction: Transaction, booking: Booking):
+  def __init__(self, transaction: Transaction, source_object):
     self._transaction = transaction
-    self._booking = booking
+    self._source = source_object
 
   def generate(self):
+    bill_info = self._source.get_bill_info()
+    
+    discounted_amount = bill_info["total_base_price"] - self._transaction.amount
+
     return {
       "receipt_no": self._transaction.id,
       "date": self._transaction.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
       "merchant": "Knight Chicken Fast Food Co.",
-      "customer": self._booking.member.name,
-      "items": [
-          {"name": "Room Charge", "price": self._booking.room_price},
-          {"name": "Food Orders", "price": self._booking.event_order.total_price if self._booking.event_order else 0}
-      ],
-      "total_base_price" : self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0,
+      "order_type": self._transaction.order_type,
+      
+      "customer": bill_info["customer_name"],
+      "items": bill_info["items"],
+      "total_base_price": bill_info["total_base_price"],
+      
       "discount_coupon": self._transaction.coupon_code,
-      "discounted": (self._booking.room_price + self._booking.event_order.total_price if self._booking.event_order else 0) - self._transaction.amount,
+      "discount_amount": discounted_amount,
       "total_paid": self._transaction.amount,
       "payment_method": self._transaction.strategy,
       "status": "PAID"
     }
+  
 
 # API Endpoints 
 
@@ -325,7 +419,7 @@ async def get_base_price(booking_id: str):
     }
 
 @mcp.tool
-async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query(default=None)):
+async def pay_event(booking_id: str, strategy: str, coupon_code: Optional[str] = Query(default=None)):
     """
     จ่ายเงิน โดยรับ booking_id เป็น parameter มี Format เป็น Bxxx ช่องทางการจ่ายเงิน มี QRCode , Cash(เงินสด) และ CreditCard
     และจะใช้คูปองหรือไม่ก็ได้ ถ้าใช้คูปอง จะรับคูปองมาเป็น Code
@@ -351,7 +445,7 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
     payment_strategy = PaymentStrategy.get_strategy(strategy)
     success, receipt_or_msg = payment_strategy.pay(final_total)
 
-    transaction = Transaction(booking_id,final_total,strategy.lower(), "PENDING", receipt_or_msg, coupon_code if discount > 0 else None)
+    transaction = Transaction(booking_id,final_total,strategy.lower(), "PENDING", receipt_or_msg, coupon_code if discount > 0 else None, order_type=OrderType.EVENT)
 
     if success:
         booking.status = BookingStatus.IN_USE
@@ -367,6 +461,48 @@ async def pay(booking_id: str, strategy: str, coupon_code: Optional[str] = Query
         LogManager.add_log(transaction)
 
         receipt = Receipt(transaction, booking)
+        return receipt.generate()
+    
+    else:
+        transaction.mark_failed()
+        LogManager.add_log(transaction)
+
+        raise HTTPException(status_code=402, detail=f"Payment Failed: {receipt_or_msg}")
+    
+@mcp.tool
+async def create_delivery_order(order_id: str, customer_id: str, platform_name: str):
+    """
+    สร้าง create_delivery_order และจ่ายเงินเสร็จสิ้น แล้ว ส่ง order ที่ชำระเงินสำเร็จไป ต่อคิวทำอาหารในครัวต่อ
+    
+    :type order_id: str
+    :type customer_id: str
+    :type platform_name: str
+    """
+    try:
+        platform = DeliveryPlatformName(platform_name) 
+    except ValueError:
+        platform = DeliveryPlatformName.GRAB_FOOD
+        
+    order = DeliveryOrder(order_id, customer_id, platform)
+
+    menu = Restaurant.get_menu()
+
+    for _ in range(2):
+        food = random.choice(menu)
+        order.add_food(food)
+
+    total = order.total_price
+    success, receipt_or_msg = CreditCard.pay(total)
+
+    transaction = Transaction(order.id,total,CreditCard.get_name().lower(), "PENDING", receipt_or_msg, order_type=OrderType.DELIVERY)
+
+    if success:
+        transaction.mark_success()
+        order.mark_as_paid()
+        LogManager.add_log(transaction)
+        receipt = Receipt(transaction, order)
+        Restaurant.receive_order(order)
+
         return receipt.generate()
     
     else:

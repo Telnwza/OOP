@@ -67,7 +67,7 @@ class DeliveryOrder:
         
         return discount, final
 
-    def confirm_payment(self, method: str, receipt: str, discount: float, final_price: float, coupon_code: str = None):
+    def confirm_payment(self, method: str, receipt: str, discount: float, final_price: float, coupon_code: Optional[str] = None):
         """State Transition Method"""
         self._status = OrderStatus.PLACED
         self._payment_method = method
@@ -151,7 +151,7 @@ class PercentCoupon(Coupon):
   
 class PaymentStrategy(ABC):
     @classmethod
-    def get_strategy(cls, name: str) -> PaymentStrategy:
+    def get_strategy(cls, name: str):
       for strategy_cls in PaymentStrategy.__subclasses__():
         try:
           if strategy_cls.get_name().lower() == name.lower():
