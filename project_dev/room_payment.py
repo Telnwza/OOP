@@ -472,6 +472,9 @@ async def pay_event(booking_id: str, strategy: str, coupon_code: Optional[str] =
         Restaurant.add_log(transaction)
 
         raise HTTPException(status_code=402, detail=f"Payment Failed: {receipt_or_msg}")
+    
+
+## mock data ##
 
 BookingManager._booking_list.clear()
 
