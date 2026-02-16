@@ -44,6 +44,57 @@ class BookingStatus(Enum):
     PENDING = "Pending"
     IN_USE = "In Use"
 
+##### Delivery #####
+
+class Food:
+    def __init__(self, name, price):
+        self.name = name
+        self.price = price
+
+class DeliveryOrder:
+    def __init__(self, id: str, customer_id: str, platform: DeliveryPlatformName):
+        self._id = id
+        self._customer_id = customer_id
+        self._platform = platform
+        self._food_list: list[Food] = []
+        self._total_price: float = 0.0
+        self._status = OrderStatus.PENDING
+        self._receipt_id = None
+
+    def add_food(self, food: Food):
+        self._food_list.append(food)
+        self._total_price += food.price
+
+    def mark_as_paid(self):
+        self._status = OrderStatus.PAID
+    
+    def get_bill_info(self):
+        items = [{"name": f.name, "price": f.price} for f in self._food_list]
+        
+        return {
+            "customer_name": self._customer_id,
+            "items": items,
+            "total_base_price": self._total_price
+        }
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def total_price(self):
+        return self._total_price
+    
+    @property
+    def status(self):
+        return self._status
+    
+    @status.setter
+    def status(self, status: EventOrderStatus):
+        self._status = status
+
+##### Booking #####
+
 class Coupon(ABC):
     def __init__(self, id, code, minimum_price) -> None:
         self._id = id
@@ -190,15 +241,33 @@ class Restaurant:
     _transaction_list: List[Transaction] = []
     _coupon_list: List[Coupon] = []
     _member_list: List[Member] = []
+    _order_queue: list[DeliveryOrder] = []
+    _menu = [
+        Food("Chicken", 50.5), 
+        Food("Burger", 89.0), 
+        Food("Coke", 25.0)
+        ]
     
     @classmethod
     def add_log(cls, transaction: Transaction):
       cls._transaction_list.append(transaction)
       print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction.status} | {transaction.amount} THB")
 
+    
+    @classmethod
+    def get_menu(cls):
+        return cls._menu
+
     @classmethod
     def add_member(cls, member: Member):
         cls._member_list.append(member)
+    
+    @classmethod
+    def receive_order(cls, order: DeliveryOrder):
+        if order.status == OrderStatus.PAID:
+            cls._order_queue.append(order)
+        else:
+            raise HTTPException(status_code=400, detail=f"Order Not paid yet")
 
     @classmethod
     def add_coupon(cls, coupon: Coupon):
@@ -406,6 +475,48 @@ async def pay_event(booking_id: str, strategy: str, coupon_code: Optional[str] =
 
         raise HTTPException(status_code=402, detail=f"Payment Failed: {receipt_or_msg}")
     
+@mcp.tool
+async def create_delivery_order(order_id: str, customer_id: str, platform_name: str):
+    """
+    สร้าง create_delivery_order และจ่ายเงินเสร็จสิ้น แล้ว ส่ง order ที่ชำระเงินสำเร็จไป ต่อคิวทำอาหารในครัวต่อ
+    
+    :type order_id: str
+    :type customer_id: str
+    :type platform_name: str
+    """
+    try:
+        platform = DeliveryPlatformName(platform_name) 
+    except ValueError:
+        platform = DeliveryPlatformName.GRAB_FOOD
+        
+    order = DeliveryOrder(order_id, customer_id, platform)
+
+    menu = Restaurant.get_menu()
+
+    for _ in range(2):
+        food = random.choice(menu)
+        order.add_food(food)
+
+    total = order.total_price
+    success, receipt_or_msg = CreditCard.pay(total)
+
+    transaction = Transaction(order.id,total,CreditCard.get_name().lower(), "PENDING", receipt_or_msg, order_type=OrderType.DELIVERY)
+
+    if success:
+        transaction.mark_success()
+        order.mark_as_paid()
+        Restaurant.add_log(transaction)
+        receipt = Receipt(transaction, order)
+        Restaurant.receive_order(order)
+
+        return receipt.generate()
+    
+    else:
+        transaction.mark_failed()
+        Restaurant.add_log(transaction)
+
+        raise HTTPException(status_code=402, detail=f"Payment Failed: {receipt_or_msg}")
+
 # ==========================================
 # Mock Data
 # ==========================================
