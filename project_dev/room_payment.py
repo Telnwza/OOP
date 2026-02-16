@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 import uuid
 import random
 
+app = FastAPI()
 mcp = FastMCP()
 
 class Status(Enum):
@@ -128,6 +129,10 @@ class Member:
         self._id = id
         self._name = name
         self._coupon_list: List[List[str | CouponStatus]] = [] 
+        self._receipt_list: List[Receipt] = []
+
+    def add_receipt(self, receipt: Receipt):
+        self._receipt_list.append(receipt)
 
     def add_coupon(self, code: str):
         self._coupon_list.append([code, CouponStatus.AVALIBLE])
@@ -233,6 +238,7 @@ class Booking:
     def event_order(self): return self._event_order
 
 class Restaurant:
+    _transaction_list: List[Transaction] = []
     _coupon_list: List[Coupon] = []
     _member_list: List[Member] = []
     _order_queue: list[DeliveryOrder] = []
@@ -241,6 +247,12 @@ class Restaurant:
         Food("Burger", 89.0), 
         Food("Coke", 25.0)
         ]
+    
+    @classmethod
+    def add_log(cls, transaction: Transaction):
+      cls._transaction_list.append(transaction)
+      print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction.status} | {transaction.amount} THB")
+
     
     @classmethod
     def get_menu(cls):
@@ -329,15 +341,6 @@ class Cash(PaymentStrategy):
       success = random.random() < 0.99
       if success : return True, f"REC-{uuid.uuid4().hex[:8].upper()}"
       return False, "Payment Declined"
-
-class LogManager:
-    _transaction_list: List[Transaction] = []
-
-    @classmethod
-    def add_log(cls, transaction: Transaction):
-      cls._transaction_list.append(transaction)
-      print(f"[SYSTEM LOG] {transaction.timestamp} | {transaction.id} | {transaction.status} | {transaction.amount} THB")
-
     
 class Transaction:
     def __init__(self, target_id: str, amount: float, strategy: str, status: str, payment_id: str, coupon_code: Optional[str] = None, order_type: OrderType = OrderType.GENERAL):
@@ -402,6 +405,7 @@ class Receipt:
 # API Endpoints 
 
 @mcp.tool
+@app.get("/partyroom-payment/get_base_price/{booking_id}")
 async def get_base_price(booking_id: str):
     """
     ตรวจสอบจำนวนเงินทั้งหมดที่ต้องจ่าย แบบที่ยังไม่ใส่ส่วนลด โดยรับ booking_id เป็น parameter มี Format เป็น Bxxx
@@ -419,6 +423,7 @@ async def get_base_price(booking_id: str):
     }
 
 @mcp.tool
+@app.post("/partyroom-payment/pay/{booking_id}")
 async def pay_event(booking_id: str, strategy: str, coupon_code: Optional[str] = Query(default=None)):
     """
     จ่ายเงิน โดยรับ booking_id เป็น parameter มี Format เป็น Bxxx ช่องทางการจ่ายเงิน มี QRCode , Cash(เงินสด) และ CreditCard
@@ -458,14 +463,15 @@ async def pay_event(booking_id: str, strategy: str, coupon_code: Optional[str] =
               raise HTTPException(status_code=500, detail="can't mark coupon as used") 
 
         transaction.mark_success()
-        LogManager.add_log(transaction)
+        Restaurant.add_log(transaction)
 
         receipt = Receipt(transaction, booking)
+        member.add_receipt(receipt)
         return receipt.generate()
     
     else:
         transaction.mark_failed()
-        LogManager.add_log(transaction)
+        Restaurant.add_log(transaction)
 
         raise HTTPException(status_code=402, detail=f"Payment Failed: {receipt_or_msg}")
     
@@ -499,7 +505,7 @@ async def create_delivery_order(order_id: str, customer_id: str, platform_name: 
     if success:
         transaction.mark_success()
         order.mark_as_paid()
-        LogManager.add_log(transaction)
+        Restaurant.add_log(transaction)
         receipt = Receipt(transaction, order)
         Restaurant.receive_order(order)
 
@@ -507,7 +513,7 @@ async def create_delivery_order(order_id: str, customer_id: str, platform_name: 
     
     else:
         transaction.mark_failed()
-        LogManager.add_log(transaction)
+        Restaurant.add_log(transaction)
 
         raise HTTPException(status_code=402, detail=f"Payment Failed: {receipt_or_msg}")
 
