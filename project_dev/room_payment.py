@@ -270,7 +270,7 @@ class Transaction:
       self._status = status
       self._payment_id = payment_id
       self._coupon_code = coupon_code
-      self._timestamp = datetime.now()
+      self._timestamp = SimulationClock.get_time()
       self._order_type = order_type
       self._staff_id = staff_id
 
@@ -412,6 +412,9 @@ class Receipt:
 @mcp.tool
 @app.get("/partyroom-payment/get_base_price/{booking_id}")
 async def get_base_price(booking_id: str):
+    """
+    ตรวจสอบจำนวนเงินทั้งหมดที่ต้องจ่าย แบบที่ยังไม่ใส่ส่วนลด booking_id รูปแบบ Bxxx
+    """
     booking = BookingManager.get_booking_from_id(booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking Not Found")
@@ -427,6 +430,12 @@ async def get_base_price(booking_id: str):
 @mcp.tool
 @app.post("/partyroom-payment/pay/{booking_id}")
 async def pay_event(booking_id: str, strategy: str, coupon_code: Optional[str] = Query(default=None)):
+    """
+    จ่ายเงิน พร้อมรองรับ Coupon และสร้าง Transaction Log 
+    รับ booking_id รูปแบบ Bxxx
+    รับรูปแบบการชำระเงิน มี cash creditcard และ qrcode
+    และรับ coupon_code เป็น Optional
+    """
     booking = BookingManager.get_booking_from_id(booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking Not Found")
@@ -501,21 +510,21 @@ bob.add_coupon("SAVE10")
 bob.add_coupon("SAVE20")
 
 order1 = EventOrder("ORD-001", 150.0)
-b1 = Booking("B001", alice, Restaurant.rooms[0], datetime.now(), 2)
+b1 = Booking("B001", alice, Restaurant.rooms[0], SimulationClock.get_time(), 2)
 b1.add_event_order(order1)
 BookingManager.add_booking(b1)
 
 order2 = EventOrder("ORD-002", 600.0)
-b2 = Booking("B002", bob, Restaurant.rooms[2], datetime.now(), 1)
+b2 = Booking("B002", bob, Restaurant.rooms[2], SimulationClock.get_time(), 1)
 b2.add_event_order(order2)
 BookingManager.add_booking(b2)
 
 order3 = EventOrder("ORD-003", 50.0)
-b3 = Booking("B003", alice, Restaurant.rooms[0], datetime.now(), 1)
+b3 = Booking("B003", alice, Restaurant.rooms[0], SimulationClock.get_time(), 1)
 b3.add_event_order(order3)
 BookingManager.add_booking(b3)
 
-b4 = Booking("B004", bob, Restaurant.rooms[4], datetime.now(), 2)
+b4 = Booking("B004", bob, Restaurant.rooms[4], SimulationClock.get_time(), 2)
 BookingManager.add_booking(b4)
 
 print("Mock Data Initialized. Ready to test.")
