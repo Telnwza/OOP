@@ -419,6 +419,9 @@ async def get_base_price(booking_id: str):
     if not booking:
         raise HTTPException(status_code=404, detail="Booking Not Found")
     
+    if booking.status != BookingStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Booking already paid")
+    
     return {
         "booking_id": booking.id,
         "room_price": booking.room_price,
