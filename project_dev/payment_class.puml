@@ -1,0 +1,210 @@
+@startuml ASD
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam monochrome true
+
+package "Enums" {
+    enum OrderType {
+        GENERAL
+        DELIVERY
+        EVENT
+    }
+    enum OrderStatus {
+        PENDING
+        PAID
+        CANCELED
+    }
+    enum BookingStatus {
+        PENDING
+        DEPOSIT_PAID
+        CHECKED_IN
+        COMPLETED
+    }
+    enum RoomType {
+        VIP
+        STANDARD
+        HALL
+    }
+    enum MemberTier {
+        BRONZE
+        SILVER
+        GOLD
+    }
+}
+
+package "Core Entities" {
+    class User {
+        - id: str
+        - name: str
+        + id(): str
+        + name(): str
+    }
+
+    class Staff extends User {
+        - role: StaffRole
+    }
+
+    class PartyStaff extends Staff {
+    }
+
+    class Customer extends User {
+    }
+
+    class Member extends Customer {
+        - tier: MemberTier
+        - coupon_list: List<Coupon>
+        - receipt_list: List<Receipt>
+        + add_receipt(r: Receipt)
+        + add_coupon(c: Coupon)
+    }
+
+    abstract class Coupon {
+        - id: str
+        - code: str
+        - minimum_price: float
+        - status: CouponStatus
+        + {abstract} apply_coupon(base: float): float
+        + mark_as_used()
+    }
+
+    class PercentCoupon extends Coupon {
+        - percent: float
+    }
+}
+
+package "Resource & Assets" {
+    class Food {
+        - name: str
+        - price: float
+    }
+
+    class Room {
+        - room_id: str
+        - room_type: RoomType
+        - status: RoomStatus
+        - price_per_hour: float
+        + mark_room_in_use()
+    }
+}
+
+package "Order System" {
+    abstract class OrderItem {
+        + {abstract} name: str
+        + {abstract} price: float
+        + {abstract} get_details(): Dict
+    }
+
+    class FoodOrderItem extends OrderItem {
+        - quantity: int
+        - food: Food
+    }
+
+    class Booking extends OrderItem {
+        - id: str
+        - start_time: datetime
+        - hours: int
+        - net_full_price: float
+        - paid_deposit: float
+        - status: BookingStatus
+        - room: Room
+        - member: Member
+        + mark_paid_deposit()
+        + mark_checked_in()
+        + mark_completed()
+    }
+
+    abstract class Order {
+        - id: str
+        - items: List<OrderItem>
+        - status: OrderStatus
+        - coupon_used: Coupon
+        - subtotal: float
+        - discount: float
+        - final_price: float
+        + add_item(item: OrderItem)
+        + calculate_totals(coupon: Coupon)
+        + {abstract} order_type: OrderType
+        + get_bill_info(): Dict
+    }
+
+    class GeneralOrder extends Order {
+    }
+
+    class EventOrder extends Order {
+        + linked_booking: Booking
+        + add_booking_item(b: Booking)
+    }
+
+    class DeliveryOrder extends Order {
+        - delivery_address: str
+        - rider_fee: float
+    }
+}
+
+package "Payment & Transaction" {
+    abstract class PaymentStrategy {
+        - id: str
+        - name: str
+        + {abstract} pay(amount: float, kwargs): Tuple
+    }
+
+    class QRCode extends PaymentStrategy {}
+    class CreditCard extends PaymentStrategy {}
+    class Cash extends PaymentStrategy {}
+
+    class Transaction {
+        - id: str
+        - source: Order
+        - amount: float
+        - strategy: str
+        - status: str
+        - timestamp: datetime
+        + mark_success()
+        + mark_failed()
+    }
+
+    class Receipt {
+        - transaction: Transaction
+        - source: Order
+        + generate(): Dict
+    }
+}
+
+package "System" {
+    class Kitchen {
+        - order_queue: List<Order>
+        + add_order(o: Order)
+    }
+
+    class Restaurant {
+        - bookings: List<Booking>
+        - orders: List<Order>
+        - members: List<Member>
+        - staff_list: List<Staff>
+        + add_transaction(t: Transaction)
+        + get_order(id): Order
+    }
+}
+
+' Relationships
+FoodOrderItem --> Food : has
+Booking --> Room : reserves
+Booking --> Member : for
+
+Order *-- OrderItem : contains
+Order --> Member : belongs to
+Order --> Coupon : uses
+
+EventOrder ..> Booking : links to
+
+Transaction --> Order : pays for
+Receipt --> Transaction : proof of
+Receipt --> Order : details from
+
+Restaurant o-- Order
+Restaurant o-- Booking
+Restaurant o-- Member
+Restaurant --> Kitchen : sends food orders
+
+PaymentStrategy <.. Restaurant : uses
+@enduml
