@@ -1,0 +1,105 @@
+@startuml ConfirmPaySequence
+skinparam maxMessageSize 150
+skinparam ParticipantPadding 10
+skinparam BoxPadding 10
+
+actor Client
+boundary "API: confirm_pay" as API
+participant "restaurant\n:Restaurant" as Rest
+participant "order\n:Order" as Order
+participant "staff\n:Staff" as Staff
+participant "coupon\n:Coupon" as Coupon
+participant "strategy\n:PaymentStrategy" as Strategy
+participant "transaction\n:Transaction" as Txn
+participant "booking\n:Booking" as Booking
+participant "kitchen\n:Kitchen" as Kitchen
+participant "receipt\n:Receipt" as Receipt
+participant "customer\n:Member" as Member
+
+Client -> API : POST /payment/confirm_pay/{order_id}
+activate API
+
+API -> Rest : get_order(order_id)
+activate Rest
+Rest --> API : order
+deactivate Rest
+
+API -> Rest : get_staff(staff_id)
+activate Rest
+Rest --> API : staff
+deactivate Rest
+
+opt coupon_code provided
+    API -> Rest : get_coupon(coupon_code)
+    activate Rest
+    Rest --> API : coupon
+    deactivate Rest
+end
+
+API -> Order : calculate_totals(coupon)
+activate Order
+Order --> API : pre_calculated_info
+deactivate Order
+
+API -> Rest : get_payment_strategy(strategy)
+activate Rest
+Rest --> API : pay_strategy
+deactivate Rest
+
+API -> Strategy : pay(total_payable_amount, **payment_details)
+activate Strategy
+Strategy --> API : (success, txn_id, note)
+deactivate Strategy
+
+
+API -> Txn ** : <<create>> Transaction(order, strategy, PENDING, txn_id)
+activate Txn
+Txn --> API
+deactivate Txn
+
+alt success == True OR total_payable_amount == 0
+    API -> Order : status = PAID
+    API -> Txn : mark_success()
+    
+    opt isinstance(order, EventOrder)
+        API -> Booking : mark_checked_in()
+        activate Booking
+        Booking -> Booking : room.mark_room_in_use()
+        deactivate Booking
+    end
+
+    API -> Kitchen : add_order(order)
+    activate Kitchen
+    Kitchen --> API
+    deactivate Kitchen
+
+    opt coupon exists
+        API -> Coupon : mark_as_used()
+    end
+
+    API -> Rest : add_transaction(transaction)
+    
+    API -> Receipt ** : <<create>> Receipt(transaction, order)
+    activate Receipt
+    Receipt --> API
+    deactivate Receipt
+    
+    opt isinstance(order.customer, Member)
+        API -> Member : add_receipt(receipt)
+    end
+    
+    API -> Receipt : generate()
+    activate Receipt
+    Receipt --> API : JSON Receipt
+    deactivate Receipt
+    
+    API --> Client : Return Receipt JSON
+
+else success == False
+    API -> Txn : mark_failed()
+    API -> Rest : add_transaction(transaction)
+    API --> Client : Raise "Payment Failed"
+end
+
+deactivate API
+@enduml

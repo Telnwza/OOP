@@ -1,11 +1,15 @@
-@startuml PartyRoomPaymentSystem
+@startuml DetailedClassDiagram
 
 skinparam linetype ortho
 skinparam classAttributeIconSize 0
+skinparam monochrome true
+skinparam shadowing false
+skinparam nodesep 50
+skinparam ranksep 50
 
-' ============================
-' 1. ENUMS
-' ============================
+' ==============================
+' ENUMS
+' ==============================
 package "Enums" {
     enum OrderType {
         GENERAL
@@ -23,6 +27,12 @@ package "Enums" {
         CHECKED_IN
         COMPLETED
     }
+    enum RoomStatus {
+        AVAILABLE
+        RESERVED
+        IN_USE
+        CLEANING
+    }
     enum RoomType {
         VIP
         STANDARD
@@ -37,234 +47,303 @@ package "Enums" {
         AVAILABLE
         NOT_AVAILABLE
     }
-    enum RoomStatus {
-        AVAILABLE
-        RESERVED
-        IN_USE
-        CLEANING
-    }
     enum StaffRole {
         PartyStaff
         KitchenStaff
     }
+    enum TransactionStatus {
+        PENDING
+        FAILED
+        SUCCESS
+    }
 }
 
-' ============================
-' 2. UTILITIES
-' ============================
+' ==============================
+' UTILITIES
+' ==============================
 class SimulationClock {
-    - current_time : datetime
-    + {static} set_time(new_time)
-    + {static} get_time()
+    - __current_time : datetime
+    + {static} set_time(new_time: datetime)
+    + {static} get_time() : datetime
 }
 
-' ============================
-' 3. USERS
-' ============================
+' ==============================
+' USERS
+' ==============================
 class User {
-    - id : str
-    - name : str
+    - __id : str
+    - __name : str
+    + id() : str
+    + name() : str
 }
 
 class Staff extends User {
-    - role : StaffRole
+    - __role : StaffRole
+    + role() : StaffRole
 }
 
 class PartyStaff extends Staff {
+    + <<constructor>> __init__(id, name)
 }
 
 class Customer extends User {
 }
 
 class Member extends Customer {
-    - tier : MemberTier
-    - coupon_list : List<Coupon>
-    - receipt_list : List<Receipt>
+    - __tier : MemberTier
+    - __coupon_list : List<Coupon>
+    - __receipt_list : List<Receipt>
     + add_receipt(receipt: Receipt)
     + add_coupon(coupon: Coupon)
-    + get_coupon_by_code(code: str)
+    + get_coupon_by_code(code: str) : Coupon
+    + tier() : MemberTier
 }
 
-' ============================
-' 4. ASSETS (Room & Food)
-' ============================
+' ==============================
+' ITEMS & RESOURCES
+' ==============================
 class Food {
-    - name : str
-    - price : float
+    - __name : str
+    - __price : float
+    + name() : str
+    + price() : float
 }
 
 class Room {
-    - room_id : str
-    - room_type : RoomType
-    - status : RoomStatus
-    - price_per_hour : float
-    - capacity : int
+    - __room_id : str
+    - __room_type : RoomType
+    - __status : RoomStatus
+    - __price_per_hour : float
+    - __capacity : int
     + mark_room_in_use()
+    + price_per_hour() : float
+    + id() : str
+    + status() : RoomStatus
+    + type() : RoomType
+    + capacity() : int
 }
 
-' ============================
-' 5. ORDER ITEMS & BOOKING
-' ============================
-abstract class OrderItem {
-    + {abstract} name : str
-    + {abstract} price : float
-    + {abstract} get_details() : Dict
+class FoodOrderItem {
+    - __food : Food
+    - __quantity : int
+    + name() : str
+    + price() : float
+    + get_details() : Dict<str, Any>
 }
 
-class FoodOrderItem extends OrderItem {
-    - food : Food
-    - quantity : int
-}
-
-class Booking extends OrderItem {
-    - id : str
-    - member : Member
-    - room : Room
-    - start_time : datetime
-    - hours : int
-    - net_full_price : float
-    - paid_deposit : float
-    - status : BookingStatus
+class Booking {
+    - __id : str
+    - __member : Member
+    - __room : Room
+    - __start_time : datetime
+    - __hours : int
+    - __net_full_price : float
+    - __paid_deposit : float
+    - __status : BookingStatus
     + mark_paid_deposit()
-    + mark_checked_in()
     + mark_completed()
+    + mark_checked_in()
+    + name() : str
+    + price() : float
+    + get_details() : Dict<str, Any>
+    + id() : str
+    + full_price() : float
+    + paid_deposit() : float
+    + status() : BookingStatus
+    + room() : Room
+    + hours() : int
 }
 
-' ============================
-' 6. ORDER SYSTEM
-' ============================
-abstract class Order {
-    - id : str
-    - customer : Member
-    - items : List<OrderItem>
-    - status : OrderStatus
-    - coupon_used : Coupon
-    - subtotal : float
-    - discount : float
-    - final_price : float
-    - deposit_deducted : float
-    + add_item(item: OrderItem)
-    + calculate_totals(coupon: Coupon)
-    + get_bill_info() : Dict
-    + {abstract} order_type : OrderType
-}
-
-class GeneralOrder extends Order {
-}
-
-class EventOrder extends Order {
-    + linked_booking : Booking
-    + add_booking_item(booking: Booking)
-}
-
-class DeliveryOrder extends Order {
-    - delivery_address : str
-    - rider_fee : float
-    + calculate_totals()
-}
-
-' ============================
-' 7. COUPONS
-' ============================
+' ==============================
+' COUPONS
+' ==============================
 abstract class Coupon {
-    - id : str
-    - code : str
-    - minimum_price : float
-    - status : CouponStatus
-    + is_applicable(base_price) : bool
+    - __id : str
+    - __code : str
+    - __minimum_price : float
+    - __status : CouponStatus
+    + minimum_price() : float
+    + status() : CouponStatus
+    + code() : str
+    + is_applicable(base_price: float) : bool
+    + {abstract} apply_coupon(base_price: float) : float
     + mark_as_used()
-    + {abstract} apply_coupon(base_price) : float
 }
 
 class PercentCoupon extends Coupon {
-    - percent : float
+    - __percent : float
+    + apply_coupon(base_price: float) : float
 }
 
-' ============================
-' 8. PAYMENT SYSTEM
-' ============================
+class FixedAmountCoupon extends Coupon {
+    - __amount : float
+    + apply_coupon(base_price: float) : float
+}
+
+' ==============================
+' PAYMENT STRATEGIES
+' ==============================
 abstract class PaymentStrategy {
-    - id : str
-    - name : str
-    + {abstract} pay(amount, kwargs) : Tuple
+    - __id : str
+    - __name : str
+    + name() : str
+    + {abstract} pay(amount: float, kwargs) : Tuple<bool, str, str>
 }
 
-class QRCode extends PaymentStrategy {}
-class CreditCard extends PaymentStrategy {}
-class Cash extends PaymentStrategy {}
+class QRCode extends PaymentStrategy {
+    + pay(amount, kwargs) : Tuple
+}
 
+class CreditCard extends PaymentStrategy {
+    + pay(amount, kwargs) : Tuple
+}
+
+class Cash extends PaymentStrategy {
+    + pay(amount, kwargs) : Tuple
+}
+
+' ==============================
+' ORDERS
+' ==============================
+abstract class Order {
+    # _id : str
+    # _customer : Customer
+    # _items : List<FoodOrderItem>
+    # _status : OrderStatus
+    # _coupon_used : Coupon
+    # _subtotal : float
+    # _discount : float
+    # _final_price : float
+    + add_item(item: FoodOrderItem)
+    + {abstract} order_type() : OrderType
+    + pre_calculate_totals(coupon: Coupon) : Dict<str, Any>
+    + calculate_totals(coupon: Coupon) : Dict<str, Any>
+    + id() : str
+    + total_payable_amount() : float
+    + coupon_used() : Coupon
+    + items() : List<FoodOrderItem>
+    + customer() : Customer
+    + status() : OrderStatus
+    + status(val: OrderStatus) <<setter>>
+    + get_bill_info() : Dict<str, Any>
+}
+
+class GeneralOrder extends Order {
+    + order_type() : OrderType
+}
+
+class EventOrder extends Order {
+    - __booking : Booking
+    + order_type() : OrderType
+    + booking() : Booking
+    + pre_calculate_totals(coupon: Coupon) : Dict<str, Any>
+    + get_bill_info() : Dict<str, Any>
+}
+
+class DeliveryOrder extends Order {
+    - __delivery_address : str
+    - __rider_fee : float
+    + order_type() : OrderType
+    + delivery_address() : str
+    + pre_calculate_totals(coupon: Coupon) : Dict<str, Any>
+    + get_bill_info() : Dict<str, Any>
+}
+
+' ==============================
+' TRANSACTIONS & SYSTEM
+' ==============================
 class Transaction {
-    - id : str
-    - source : Order
-    - target_id : str
-    - amount : float
-    - strategy : str
-    - status : str
-    - payment_id : str
-    - staff_id : str
+    - __id : str
+    - __order : Order
+    - __amount : float
+    - __order_type : OrderType
+    - __coupon : Coupon
+    - __strategy : PaymentStrategy
+    - __status : TransactionStatus
+    - __payment_id : str
+    - __timestamp : datetime
     + mark_success()
     + mark_failed()
+    + order() : Order
+    + id() : str
+    + timestamp() : datetime
+    + amount() : float
+    + strategy() : PaymentStrategy
+    + order_type() : OrderType
+    + status() : TransactionStatus
 }
 
 class Receipt {
-    - transaction : Transaction
-    - source : Order
-    + generate() : Dict
+    - __transaction : Transaction
+    - __source : Order
+    + generate() : Dict<str, Any>
 }
 
-' ============================
-' 9. SYSTEM AGGREGATE
-' ============================
 class Kitchen {
-    - order_queue : List<Order>
+    - __order_queue : List<Order>
     + add_order(order: Order)
 }
 
 class Restaurant {
-    - transaction_list : List<Transaction>
-    - coupon_list : List<Coupon>
-    - members : List<Member>
-    - staff_list : List<Staff>
-    - bookings : List<Booking>
-    - orders : List<Order>
-    - payment_strategies : List<PaymentStrategy>
-    + add_booking()
-    + add_order()
-    + add_transaction()
-    + get_order()
+    - __transaction_list : List<Transaction>
+    - __coupon_list : List<Coupon>
+    - __members : List<Member>
+    - __staff_list : List<Staff>
+    - __kitchen : Kitchen
+    - __bookings : List<Booking>
+    - __orders : List<Order>
+    - __payment_strategies : List<PaymentStrategy>
+    + kitchen() : Kitchen
+    + add_booking(booking: Booking)
+    + get_booking(id: str) : Booking
+    + add_order(order: Order)
+    + get_order(id: str) : Order
+    + add_payment_strategy(strategy: PaymentStrategy)
+    + get_payment_strategy(name: str) : PaymentStrategy
+    + add_transaction(t: Transaction)
+    + add_member(m: Member)
+    + add_coupon(c: Coupon)
+    + add_staff(s: Staff)
+    + get_coupon(code: str) : Coupon
+    + get_staff(id: str) : Staff
+    + get_member(id: str) : Member
 }
 
-' ============================
+' ==============================
 ' RELATIONSHIPS
-' ============================
+' ==============================
 
-' Order Composition
-Order *-- OrderItem
-Order --> Member : belongs to
+' System relationships
+Restaurant *-- Kitchen
+Restaurant o-- Transaction
+Restaurant o-- Coupon
+Restaurant o-- Member
+Restaurant o-- Staff
+Restaurant o-- Booking
+Restaurant o-- Order
+Restaurant o-- PaymentStrategy
+
+' Order relationships
+Order *-- FoodOrderItem
+Order --> Customer
 Order --> Coupon : uses
-
-' Item Details
 FoodOrderItem --> Food
+
+' Specific Order linkages
+EventOrder --> Booking
+
+' Booking linkages
 Booking --> Room
 Booking --> Member
 
-' Order Specialization
-EventOrder --> Booking : links
-
-' Payment Flow
-Restaurant --> PaymentStrategy : holds
-Transaction --> Order : pays for
+' Transaction & Receipt
+Transaction --> Order
+Transaction --> PaymentStrategy
 Receipt --> Transaction
 Receipt --> Order
-Member --> Receipt : keeps
 
-' System Structure
-Restaurant o-- Order
-Restaurant o-- Booking
-Restaurant o-- Member
-Restaurant o-- Staff
-Restaurant o-- Coupon
-Restaurant o-- Transaction
-Restaurant --> Kitchen
+' Member linkages
+Member o-- Receipt
+Member o-- Coupon
 
 @enduml
