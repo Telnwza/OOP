@@ -8,13 +8,14 @@ boundary "API: confirm_pay" as API
 participant "restaurant\n:Restaurant" as Rest
 participant "order\n:Order" as Order
 participant "staff\n:Staff" as Staff
+participant "customer\n:Member" as Member
 participant "coupon\n:Coupon" as Coupon
 participant "strategy\n:PaymentStrategy" as Strategy
 participant "transaction\n:Transaction" as Txn
 participant "booking\n:Booking" as Booking
+participant "room\n:Room" as Room
 participant "kitchen\n:Kitchen" as Kitchen
 participant "receipt\n:Receipt" as Receipt
-participant "customer\n:Member" as Member
 
 Client -> API : POST /payment/confirm_pay/{order_id}
 activate API
@@ -30,16 +31,28 @@ Rest --> API : staff
 deactivate Rest
 
 opt coupon_code provided
-    API -> Rest : get_coupon(coupon_code)
-    activate Rest
-    Rest --> API : coupon
-    deactivate Rest
+    alt isinstance(order.customer, Member)
+        API -> Member : get_coupon_by_code(coupon_code)
+        activate Member
+        Member --> API : coupon
+        deactivate Member
+    else Not Member
+        API --> Client : Raise "Only members can use coupons"
+    end
+end
+
+opt coupon and coupon.status != AVAILABLE
+    API --> Client : Raise "Coupon is Already Used"
 end
 
 API -> Order : calculate_totals(coupon)
 activate Order
 Order --> API : pre_calculated_info
 deactivate Order
+
+opt total_payable_amount < 0
+    API --> Client : Raise "Final Price is Below 0"
+end
 
 API -> Rest : get_payment_strategy(strategy)
 activate Rest
@@ -51,7 +64,6 @@ activate Strategy
 Strategy --> API : (success, txn_id, note)
 deactivate Strategy
 
-
 API -> Txn ** : <<create>> Transaction(order, strategy, PENDING, txn_id)
 activate Txn
 Txn --> API
@@ -61,11 +73,16 @@ alt success == True OR total_payable_amount == 0
     API -> Order : status = PAID
     API -> Txn : mark_success()
     
-    opt isinstance(order, EventOrder)
+    opt isinstance(order, EventOrder) and order.booking
         API -> Booking : mark_checked_in()
         activate Booking
-        Booking -> Booking : room.mark_room_in_use()
+        Booking --> API
         deactivate Booking
+        
+        API -> Room : mark_room_in_use()
+        activate Room
+        Room --> API
+        deactivate Room
     end
 
     API -> Kitchen : add_order(order)
@@ -75,6 +92,9 @@ alt success == True OR total_payable_amount == 0
 
     opt coupon exists
         API -> Coupon : mark_as_used()
+        activate Coupon
+        Coupon --> API
+        deactivate Coupon
     end
 
     API -> Rest : add_transaction(transaction)
@@ -86,6 +106,9 @@ alt success == True OR total_payable_amount == 0
     
     opt isinstance(order.customer, Member)
         API -> Member : add_receipt(receipt)
+        activate Member
+        Member --> API
+        deactivate Member
     end
     
     API -> Receipt : generate()
