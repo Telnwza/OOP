@@ -1,0 +1,97 @@
+@startuml CalculateOrderSequence
+skinparam maxMessageSize 150
+skinparam ParticipantPadding 10
+skinparam BoxPadding 10
+skinparam monochrome true
+
+actor Client
+boundary "API: calculate_order" as API
+participant "restaurant\n:Restaurant" as Rest
+participant "order\n:Order" as Order
+participant "staff\n:Staff" as Staff
+participant "customer\n:Member" as Member
+participant "coupon\n:Coupon" as Coupon
+
+Client -> API : POST /payment/calculate_order/{order_id}
+activate API
+
+' 1. Retrieve and Validate Order
+API -> Rest : get_order(order_id)
+activate Rest
+Rest --> API : order
+deactivate Rest
+
+opt not order
+    API --> Client : Raise 404 "Order Not Found"
+end
+
+opt order.status == PAID
+    API --> Client : Raise 409 "Already Paid"
+end
+
+' 2. Retrieve and Validate Staff
+API -> Rest : get_staff(staff_id)
+activate Rest
+Rest --> API : staff
+deactivate Rest
+
+opt not staff
+    API --> Client : Raise 400 "Invalid Staff"
+end
+
+opt order.order_type == EVENT AND staff.role != PartyStaff
+    API --> Client : Raise 400 "Invalid Staff Role"
+end
+
+' 3. Validate and Retrieve Coupon
+opt coupon_code provided
+    alt isinstance(order.customer, Member)
+        API -> Member : get_coupon_by_code(coupon_code)
+        activate Member
+        Member --> API : coupon
+        deactivate Member
+    else
+        API --> Client : Raise 409 "Only members can use coupons"
+    end
+
+    opt not coupon
+        API --> Client : Raise 404 "Coupon Not Found"
+    end
+end
+
+' 4. Pre-Calculation Phase
+API -> Order : pre_calculate_totals(coupon)
+activate Order
+
+Order -> Order : Calculate base subtotal = sum(item.price)
+
+' Polymorphic behavior for specific order types (e.g., EventOrder, DeliveryOrder)
+opt EventOrder / DeliveryOrder execution
+    Order -> Order : Add booking.full_price OR rider_fee to subtotal
+end
+
+opt coupon
+    opt coupon.status != AVAILABLE
+        Order --> API : Raise ValueError("Coupon Not Available")
+        API --> Client : Raise 400 (from ValueError)
+    end
+    
+    Order -> Coupon : apply_coupon(subtotal)
+    activate Coupon
+    Coupon --> Order : discount
+    deactivate Coupon
+end
+
+Order -> Order : Calculate final_price = subtotal - discount [- deposit]
+opt final_price < 0
+    Order -> Order : final_price = 0.0
+end
+
+Order --> API : Return info Dictionary (pre_calculated_info)
+deactivate Order
+
+' 5. Return Response
+API --> Client : Return 200 OK (pre_calculated_info JSON)
+
+deactivate API
+@enduml
