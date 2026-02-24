@@ -17,7 +17,7 @@ participant "room\n:Room" as Room
 participant "kitchen\n:Kitchen" as Kitchen
 participant "receipt\n:Receipt" as Receipt
 
-Client -> API : POST /payment/confirm_pay/{order_id}
+Client -> API : confirm_pay(order_id,staff_id,coupon,strategy)
 activate API
 
 API -> Rest : get_order(order_id)
