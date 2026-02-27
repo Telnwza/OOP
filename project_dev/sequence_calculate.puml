@@ -11,6 +11,7 @@ participant "order\n:Order" as Order
 participant "staff\n:Staff" as Staff
 participant "customer\n:Member" as Member
 participant "coupon\n:Coupon" as Coupon
+participant "booking\n:Booking" as Booking
 
 Client -> API : POST /payment/calculate_order/{order_id}
 activate API

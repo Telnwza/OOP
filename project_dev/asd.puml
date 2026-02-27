@@ -1,0 +1,90 @@
+@startuml
+package "Inventory & Ingredients" {
+    class Item {
+        - id : string
+        - name : string
+        - unit_cost : float
+        - stock_quantity : float
+        - unit_type : string
+    }
+
+    class Ingredient {
+        - item : Item
+        - quantity_needed : float
+    }
+    Ingredient --> Item
+}
+
+package "Menu Catalog (Composite Pattern)" {
+    abstract class MenuItem {
+        - id : string
+        - name : string
+        - description : string
+        - base_price : float
+        - is_available : bool
+        + {abstract} get_price() : float
+        + {abstract} check_availability() : bool
+    }
+
+    class SingleMenuItem {
+        - recipe : list of Ingredient
+        - cooking_time_minutes : int
+        - allowed_customizations : list of CustomizationOption
+        + get_price() : float
+        + check_availability() : bool
+    }
+
+    class SetMenuItem {
+        - items : list of MenuItem
+        - set_discount : float
+        + get_price() : float
+        + check_availability() : bool
+    }
+
+    MenuItem <|-- SingleMenuItem
+    MenuItem <|-- SetMenuItem
+    SetMenuItem o-- MenuItem
+    SingleMenuItem *-- Ingredient
+}
+
+package "Ordering Domain" {
+    class CustomizationOption {
+        - ingredient : Ingredient
+        - action : ModificationType
+        - price_adjustment : float
+    }
+    SingleMenuItem o-- CustomizationOption
+    CustomizationOption --> Ingredient
+
+    class Customization {
+        - option : CustomizationOption
+    }
+    Customization --> CustomizationOption
+
+    class OrderItem {
+        - menu_item : MenuItem
+        - quantity : int
+        - applied_customizations : list of Customization
+        - item_status : OrderItemStatus
+        + calculate_subtotal() : float
+        + update_status(OrderItemStatus)
+    }
+    
+    OrderItem --> MenuItem
+    OrderItem *-- Customization
+}
+
+enum ModificationType {
+    ADD
+    REMOVE
+    SUBSTITUTE
+}
+
+enum OrderItemStatus {
+    PENDING
+    COOKING
+    READY
+    SERVED
+    CANCELLED
+}
+@enduml

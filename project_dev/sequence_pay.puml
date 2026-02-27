@@ -1,128 +1,142 @@
-@startuml ConfirmPaySequence
+@startuml ConfirmPaySequence_Final
 skinparam maxMessageSize 150
 skinparam ParticipantPadding 10
 skinparam BoxPadding 10
+skinparam monochrome true
 
 actor Client
 boundary "API: confirm_pay" as API
 participant "restaurant\n:Restaurant" as Rest
-participant "order\n:Order" as Order
 participant "staff\n:Staff" as Staff
+participant "order\n:Order" as Order
 participant "customer\n:Member" as Member
 participant "coupon\n:Coupon" as Coupon
-participant "strategy\n:PaymentStrategy" as Strategy
-participant "transaction\n:Transaction" as Txn
 participant "booking\n:Booking" as Booking
-participant "room\n:Room" as Room
-participant "kitchen\n:Kitchen" as Kitchen
+participant "delivery\n:Delivery" as Delivery
+participant "method\n:PaymentMethod" as Method
 participant "receipt\n:Receipt" as Receipt
 
-Client -> API : confirm_pay(order_id,staff_id,coupon,strategy)
+Client -> API : POST confirm_pay(order_id, staff_id, method, coupon_code, details)
 activate API
 
-API -> Rest : get_order(order_id)
+' Thin API Delegate to Restaurant
+API -> Rest : process_order_payment(order_id, staff_id, coupon_code, method, details)
 activate Rest
-Rest --> API : order
-deactivate Rest
 
-API -> Rest : get_staff(staff_id)
-activate Rest
-Rest --> API : staff
-deactivate Rest
+' 1. Validations & Setup
+Rest -> Rest : method = get_payment_method(method)
+Rest -> Rest : staff = get_staff(staff_id)
+Rest -> Rest : order = get_order(order_id)
 
-opt coupon_code provided
-    alt isinstance(order.customer, Member)
-        API -> Member : get_coupon_by_code(coupon_code)
-        activate Member
-        Member --> API : coupon
-        deactivate Member
-    else Not Member
-        API --> Client : Raise "Only members can use coupons"
-    end
+opt Validation Fails (Event without PartyStaff OR Already Paid)
+    Rest --> API : Raise HTTPException(400)
 end
 
-opt coupon and coupon.status != AVAILABLE
-    API --> Client : Raise "Coupon is Already Used"
-end
-
-API -> Order : calculate_totals(coupon)
+' 2. Delegate Payment Execution to Order
+Rest -> Order : execute_payment(method, details, coupon_code)
 activate Order
-Order --> API : pre_calculated_info
+
+    opt coupon_code provided
+        alt isinstance(order.customer, Member)
+            Order -> Member : get_coupon_by_code(coupon_code)
+            activate Member
+            Member --> Order : coupon
+            deactivate Member
+        else
+            Order --> Rest : Raise ValueError("Only members can use coupons")
+        end
+    end
+
+    ' 2.1 Calculate Totals Inside Order
+    Order -> Order : calculate_totals(coupon_code)
+    activate Order
+        Order -> Order : base_subtotal = sum(order_item.price)
+        
+        opt has booking
+            Order -> Booking : full_price / deposit
+            activate Booking
+            Booking --> Order
+            deactivate Booking
+        end
+        
+        opt has delivery
+            Order -> Delivery : fee
+            activate Delivery
+            Delivery --> Order
+            deactivate Delivery
+        end
+        
+        opt coupon exists
+            Order -> Coupon : apply_coupon(subtotal)
+            activate Coupon
+            Coupon --> Order : discount
+            deactivate Coupon
+        end
+    deactivate Order
+
+    ' 2.2 Payment Gateway
+    Order -> Method : pay(total_payable, **details)
+    activate Method
+    Method --> Order : (success, note)
+    deactivate Method
+
+    ' 2.3 Post-Payment Updates
+    alt success == True
+        Order -> Order : status = PAID
+        
+        opt has booking
+            Order -> Booking : mark_checked_in()
+            activate Booking
+            Booking -> Booking : room.mark_room_in_use()
+            deactivate Booking
+        end
+        
+        opt has delivery
+            Order -> Delivery : mark_as_paid()
+            activate Delivery
+            Delivery --> Order
+            deactivate Delivery
+        end
+        
+        opt coupon exists
+            Order -> Coupon : mark_as_used()
+        end
+        
+        ' 2.4 Receipt Generation
+        Order -> Receipt ** : <<create>> Receipt(self, method)
+        opt isinstance(order.customer, Member)
+            Order -> Member : add_receipt(receipt)
+        end
+        
+        Order --> Rest : receipt
+    else success == False
+        Order --> Rest : Raise HTTPException(400, note)
+    end
 deactivate Order
 
-opt total_payable_amount < 0
-    API --> Client : Raise "Final Price is Below 0"
+' 3. Save Receipt and Issue Rewards
+Rest -> Rest : add_recipts(receipt)
+
+opt check_and_issue_reward() conditions met
+    Rest -> Rest : reward_coupon = <<create>> Coupon()
+    Rest -> Member : add_coupon(reward_coupon)
+    activate Member
+    Member --> Rest
+    deactivate Member
 end
 
-API -> Rest : get_payment_strategy(strategy)
-activate Rest
-Rest --> API : pay_strategy
+Rest -> Receipt : generate()
+activate Receipt
+Receipt --> Rest : receipt_json
+deactivate Receipt
+
+opt reward_issued
+    Rest -> Rest : Add "reward_issued" to receipt_json
+end
+
+Rest --> API : receipt_json
 deactivate Rest
 
-API -> Strategy : pay(total_payable_amount, **payment_details)
-activate Strategy
-Strategy --> API : (success, txn_id, note)
-deactivate Strategy
-
-API -> Txn ** : <<create>> Transaction(order, strategy, PENDING, txn_id)
-activate Txn
-Txn --> API
-deactivate Txn
-
-alt success == True OR total_payable_amount == 0
-    API -> Order : status = PAID
-    API -> Txn : mark_success()
-    
-    opt isinstance(order, EventOrder) and order.booking
-        API -> Booking : mark_checked_in()
-        activate Booking
-        Booking --> API
-        deactivate Booking
-        
-        API -> Room : mark_room_in_use()
-        activate Room
-        Room --> API
-        deactivate Room
-    end
-
-    API -> Kitchen : add_order(order)
-    activate Kitchen
-    Kitchen --> API
-    deactivate Kitchen
-
-    opt coupon exists
-        API -> Coupon : mark_as_used()
-        activate Coupon
-        Coupon --> API
-        deactivate Coupon
-    end
-
-    API -> Rest : add_transaction(transaction)
-    
-    API -> Receipt ** : <<create>> Receipt(transaction, order)
-    activate Receipt
-    Receipt --> API
-    deactivate Receipt
-    
-    opt isinstance(order.customer, Member)
-        API -> Member : add_receipt(receipt)
-        activate Member
-        Member --> API
-        deactivate Member
-    end
-    
-    API -> Receipt : generate()
-    activate Receipt
-    Receipt --> API : JSON Receipt
-    deactivate Receipt
-    
-    API --> Client : Return Receipt JSON
-
-else success == False
-    API -> Txn : mark_failed()
-    API -> Rest : add_transaction(transaction)
-    API --> Client : Raise "Payment Failed"
-end
-
+API --> Client : Return 200 OK (Receipt JSON)
 deactivate API
 @enduml
