@@ -1,0 +1,30 @@
+@startuml asd
+left to right direction
+skinparam packageStyle rectangle
+
+actor "ลูกค้า (Customer)" as Customer
+actor "พนักงานครัว (Chef)" as Chef
+
+rectangle "Fast-Food Restaurant System" {
+    usecase "ดูรายการอาหาร (Browse Menu)" as UC1
+    usecase "สร้างออเดอร์และเพิ่มรายการ (Manage Order)" as UC2
+    usecase "ชำระเงิน (Make Payment)" as UC3
+    usecase "ตรวจสอบการชำระเงิน (Verify Payment)" as UC4
+    usecase "ชำระด้วย QR Code (QR Payment)" as UC5
+    usecase "ชำระด้วยบัตรเครดิต (Credit Card Payment)" as UC6
+    usecase "อัปเดตสถานะออเดอร์ (Update Order Status)" as UC7
+}
+
+Customer --> UC1
+Customer --> UC2
+Customer --> UC3
+
+' ความสัมพันธ์แบบ Include (บังคับทำ)
+UC3 .> UC4 : <<include>>
+
+' ความสัมพันธ์แบบ Generalization (สืบทอดรูปแบบการชำระเงิน)
+UC5 --|> UC3
+UC6 --|> UC3
+
+Chef --> UC7
+@enduml
